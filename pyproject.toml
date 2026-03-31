@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mma-mcp"
+version = "0.1.0"
+description = "Wolfram Engine MCP Server"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp[cli]>=1.0",
+    "wolframclient>=1.1",
+    "tomli>=2.0; python_version < '3.11'",
+]
+
+[project.scripts]
+mma-mcp = "mma_mcp.server:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mma_mcp"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
