@@ -28,6 +28,7 @@ class KernelConfig:
     timeout: int = 30           # WL-side TimeConstrained timeout in seconds; 0 = no limit
     hard_timeout: int = 60      # Python-side hard timeout — force-restart kernel if stuck; 0 = no limit
     max_result_size: int = 65536  # max result string length (chars); 0 = no limit
+    session_isolation: bool = True  # isolate user variables via WL context namespacing
     default_format: str = "TeXForm"
 
 
@@ -99,6 +100,8 @@ class ToolsConfig:
         "simplify",
         "integrate",
         "differentiate",
+        "plot",
+        "data_query",
     ])
 
 
@@ -184,6 +187,7 @@ def _build_kernel_config(raw: dict[str, Any]) -> KernelConfig:
         timeout=sec.get("timeout", defaults.timeout),
         hard_timeout=sec.get("hard_timeout", defaults.hard_timeout),
         max_result_size=sec.get("max_result_size", defaults.max_result_size),
+        session_isolation=sec.get("session_isolation", defaults.session_isolation),
         default_format=sec.get("default_format", defaults.default_format),
     )
 
@@ -417,6 +421,11 @@ hard_timeout = 60
 # MCP responses. 0 = no limit.
 max_result_size = 65536
 
+# Session isolation: each authenticated user gets a separate WL context
+# namespace, so variables defined by one user are invisible to others.
+# Has no effect in single-user (stdio / no auth) mode.
+session_isolation = true
+
 # Default output format: TeXForm, OutputForm, InputForm, etc.
 default_format = "TeXForm"
 
@@ -511,6 +520,9 @@ enabled = [
     "simplify",
     "integrate",
     "differentiate",
+    "plot",
+    "data_query",
+    # "query",  # WolframAlpha natural language — requires external_services group
 ]
 
 # ─── Authentication & Roles ─────────────────────────────────────────────────

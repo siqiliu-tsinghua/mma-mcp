@@ -137,6 +137,18 @@ class ToolContext:
         return self.config.kernel.max_result_size
 
     @property
+    def session_context(self) -> str:
+        """Return the WL context name for the current user, or "" if no isolation."""
+        if not self.config.kernel.session_isolation:
+            return ""
+        from mma_mcp.auth import current_user
+        from mma_mcp.kernel import sanitize_context_name
+        user = current_user.get()
+        if not user.username:
+            return ""  # anonymous / stdio — no isolation
+        return sanitize_context_name(user.username)
+
+    @property
     def default_format(self) -> str:
         return self.config.kernel.default_format
 
@@ -280,7 +292,7 @@ def register_tools(mcp: Any, ctx: ToolContext, enabled: list[str]) -> list[str]:
     Returns the list of tool names that were actually registered.
     """
     # Ensure tool modules are imported so they call @register
-    from mma_mcp.tools import evaluate, math  # noqa: F401
+    from mma_mcp.tools import data, evaluate, math, plot, query  # noqa: F401
 
     registered: list[str] = []
     for name in enabled:

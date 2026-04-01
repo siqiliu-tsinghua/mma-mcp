@@ -100,14 +100,14 @@
 - [x] `simplify` — 表达式化简
 - [x] `integrate` — 积分
 - [x] `differentiate` — 微分
-- [ ] `query` — WolframAlpha 风格自然语言查询
-- [ ] `plot` — 语义化绘图入口
-- [ ] `data_query` — 数据查询（FinancialData、WeatherData 等）
+- [x] `query` — WolframAlpha 风格自然语言查询（需启用 external_services 组）
+- [x] `plot` — 语义化绘图入口（14 种图表类型）
+- [x] `data_query` — 内置知识库查询（20 种数据源，大部分离线可用）
 - [ ] 更多工具按需添加…
 
 ## Phase 4: 健壮性
 
-- [ ] 会话隔离：`session_id` 支持多客户端独立上下文
+- [x] 会话隔离：WL context 命名空间隔离，每用户独立变量作用域
 - [ ] 内核健康检查（定期 ping / 空闲超时回收）
 - [x] 结果大小限制（`max_result_size` 配置项，超限截断）
 - [x] Python 侧硬超时（`hard_timeout` 配置项，内核卡死时强制重启）

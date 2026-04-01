@@ -298,3 +298,58 @@ class TestRegisterTools:
         result = register_tools(mcp, ctx, [])
         assert result == []
         mcp.tool.assert_not_called()
+
+
+# ===================================================================
+# Session isolation
+# ===================================================================
+
+class TestSessionIsolation:
+
+    def test_session_context_with_user(self):
+        """Authenticated user gets a WL context string."""
+        ctx = _make_ctx()
+        from mma_mcp.auth import UserIdentity, current_user
+        tok = current_user.set(UserIdentity(username="alice", role="admin"))
+        try:
+            sc = ctx.session_context
+            assert sc == "MCP$alice`"
+        finally:
+            current_user.reset(tok)
+
+    def test_session_context_anonymous(self):
+        """Anonymous user gets empty string (no isolation)."""
+        ctx = _make_ctx()
+        assert ctx.session_context == ""
+
+    def test_session_context_disabled(self):
+        """When session_isolation=False, always returns empty."""
+        from mma_mcp.config import KernelConfig
+        config = AppConfig(kernel=KernelConfig(session_isolation=False))
+        kernel = _make_kernel_mock()
+        expr_filter = ExpressionFilter("blacklist", frozenset())
+        ctx = ToolContext(config=config, kernel=kernel, expr_filter=expr_filter)
+        ctx._kernel_ready = True
+
+        from mma_mcp.auth import UserIdentity, current_user
+        tok = current_user.set(UserIdentity(username="alice", role="admin"))
+        try:
+            assert ctx.session_context == ""
+        finally:
+            current_user.reset(tok)
+
+    def test_sanitize_context_name(self):
+        from mma_mcp.kernel import sanitize_context_name
+        assert sanitize_context_name("alice") == "MCP$alice`"
+        assert sanitize_context_name("Bob123") == "MCP$Bob123`"
+        assert sanitize_context_name("a@b.c") == "MCP$abc`"
+        assert sanitize_context_name("") == "MCP$anonymous`"
+        assert sanitize_context_name("$admin") == "MCP$$admin`"
+
+    def test_wrap_context(self):
+        from mma_mcp.kernel import _wrap_context
+        assert _wrap_context("1+1", "") == "1+1"
+        wrapped = _wrap_context("x = 5", "MCP$alice`")
+        assert '$Context = "MCP$alice`"' in wrapped
+        assert '$ContextPath' in wrapped
+        assert "x = 5" in wrapped

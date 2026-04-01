@@ -52,8 +52,10 @@ mma-mcp/
 │       │       └── external_services.json  # dangerous
 │       ├── tools/
 │       │   ├── evaluate.py        # evaluate / evaluate_image
-│       │   ├── math.py            # solve / simplify / integrate
-│       │   └── query.py           # WolframAlpha-style queries
+│       │   ├── math.py            # solve / simplify / integrate / differentiate
+│       │   ├── plot.py            # plot (14 plot types → PNG)
+│       │   ├── data.py            # data_query (20 curated data sources)
+│       │   └── query.py           # WolframAlpha natural language query
 │       └── utils.py               # Result formatting, error handling
 ├── scripts/
 │   └── generate_groups.wl         # Regenerate group JSONs from local kernel
@@ -131,6 +133,10 @@ deny_groups = ["system_exec", "networking", "file_write", "dynamic_eval"]
 | `solve` | Solve equations or systems of equations |
 | `simplify` | Simplify mathematical expressions |
 | `integrate` | Symbolic or numerical integration |
+| `differentiate` | Symbolic differentiation |
+| `plot` | Structured plotting (14 plot types), return PNG image |
+| `data_query` | Query built-in curated data (20 sources: country, element, planet, …) |
+| `query` | WolframAlpha natural language query (requires `external_services` group) |
 
 ## Deployment Scenario
 

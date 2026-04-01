@@ -19,7 +19,9 @@ def evaluate(ctx: ToolContext, expression: str, form: str = "") -> str:
     ctx.check(expression)
     fmt = form or ctx.default_format
     result = ctx.kernel.evaluate_to_string(
-        expression, fmt, timeout=ctx.timeout, hard_timeout=ctx.hard_timeout,
+        expression, fmt,
+        timeout=ctx.timeout, hard_timeout=ctx.hard_timeout,
+        context=ctx.session_context,
     )
     return ctx.truncate(result)
 
@@ -35,6 +37,8 @@ def evaluate_image(ctx: ToolContext, expression: str) -> Image:
     """
     ctx.check(expression)
     png_bytes = ctx.kernel.evaluate_to_image(
-        expression, timeout=ctx.timeout, hard_timeout=ctx.hard_timeout,
+        expression,
+        timeout=ctx.timeout, hard_timeout=ctx.hard_timeout,
+        context=ctx.session_context,
     )
     return Image(data=png_bytes, format="png")

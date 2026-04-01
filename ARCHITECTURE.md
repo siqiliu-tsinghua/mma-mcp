@@ -116,6 +116,9 @@ mma-mcp 是一个 [Model Context Protocol (MCP)](https://modelcontextprotocol.io
 | **Registry** | `tools/__init__.py` | `@register` 装饰器 + `_REGISTRY`；`ToolContext` 运行时上下文（含结果截断）；`RoleRuntime` 角色权限；`_safe_wrapper` 错误捕获 + RBAC |
 | **Evaluate** | `tools/evaluate.py` | `evaluate`（文本结果）、`evaluate_image`（PNG 图片） |
 | **Math** | `tools/math.py` | `solve`、`simplify`、`integrate`、`differentiate` |
+| **Plot** | `tools/plot.py` | `plot`：结构化绘图（14 种图表类型），返回 PNG |
+| **Data** | `tools/data.py` | `data_query`：内置知识库查询（20 种数据源，大部分离线可用） |
+| **Query** | `tools/query.py` | `query`：WolframAlpha 自然语言查询（需启用 `external_services` 组） |
 
 ### 辅助模块
 

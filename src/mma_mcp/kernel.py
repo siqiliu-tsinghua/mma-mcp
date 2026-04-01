@@ -96,6 +96,10 @@ def _ensure_display() -> None:
     """
     import time
 
+    # WolframNB uses Qt for rendering; in headless environments the xcb
+    # plugin may fail even with Xvfb.  "offscreen" works reliably.
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
     if os.environ.get("DISPLAY"):
         return
     if not shutil.which("Xvfb"):
@@ -107,7 +111,9 @@ def _ensure_display() -> None:
     display = ":99"
     # Check if Xvfb is already running on this display
     lock = Path(f"/tmp/.X{display[1:]}-lock")
-    if not lock.exists():
+    if lock.exists():
+        logger.info("Xvfb already running on %s", display)
+    else:
         try:
             subprocess.Popen(
                 ["Xvfb", display, "-screen", "0", "1280x1024x24"],
@@ -223,7 +229,7 @@ class KernelSession:
 
     def evaluate_to_string(
         self, expr_str: str, form: str = "TeXForm",
-        timeout: int = 0, hard_timeout: int = 0,
+        timeout: int = 0, hard_timeout: int = 0, context: str = "",
     ) -> str:
         """Evaluate a WL expression string and return the result as a string.
 
@@ -232,11 +238,11 @@ class KernelSession:
             form:         Output format (TeXForm, OutputForm, InputForm, …).
             timeout:      WL-side TimeConstrained seconds. 0 = no limit.
             hard_timeout: Python-side hard timeout seconds. 0 = no limit.
+            context:      WL context for session isolation (e.g. "MCP$alice`").
         """
+        inner = _wrap_context(expr_str, context)
         if timeout > 0:
-            inner = f"TimeConstrained[{expr_str}, {timeout}]"
-        else:
-            inner = expr_str
+            inner = f"TimeConstrained[{inner}, {timeout}]"
         wrapped = wl.ToString(wlexpr(inner), wlexpr(form))
         result = self.evaluate(wrapped, hard_timeout=hard_timeout)
         if isinstance(result, str):
@@ -245,6 +251,7 @@ class KernelSession:
 
     def evaluate_to_image(
         self, expr_str: str, timeout: int = 0, hard_timeout: int = 0,
+        context: str = "",
     ) -> bytes:
         """Evaluate a WL expression and export the result as PNG bytes.
 
@@ -255,12 +262,12 @@ class KernelSession:
             expr_str:     Wolfram Language expression.
             timeout:      WL-side TimeConstrained seconds. 0 = no limit.
             hard_timeout: Python-side hard timeout seconds. 0 = no limit.
+            context:      WL context for session isolation.
         """
         self._ensure_started()
+        inner = _wrap_context(expr_str, context)
         if timeout > 0:
-            inner = f"TimeConstrained[{expr_str}, {timeout}]"
-        else:
-            inner = expr_str
+            inner = f"TimeConstrained[{inner}, {timeout}]"
 
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
             tmp_path = f.name
@@ -302,3 +309,49 @@ class KernelSession:
 
     def __exit__(self, *_: Any) -> None:
         self.stop()
+
+
+# ---------------------------------------------------------------------------
+# Session isolation helper
+# ---------------------------------------------------------------------------
+
+def _wrap_context(expr_str: str, context: str) -> str:
+    """Wrap an expression so it is parsed and evaluated in an isolated context.
+
+    Uses ``ToExpression`` inside a ``Block`` so that symbol resolution
+    happens *after* ``$Context`` / ``$ContextPath`` have been changed.
+    Without ``ToExpression``, ``wlexpr`` would parse ``x`` as ``Global`x``
+    before the ``Block`` takes effect.
+
+    The ``ToExpression`` here is internal infrastructure — the user's
+    expression has already passed security filtering before this point.
+
+    If *context* is empty, returns *expr_str* unchanged.
+    """
+    if not context:
+        return expr_str
+    escaped = _escape_for_wl_string(expr_str)
+    return (
+        f'Block[{{$Context = "{context}", '
+        f'$ContextPath = {{"{context}", "System`"}}}}, '
+        f'ToExpression["{escaped}"]]'
+    )
+
+
+def _escape_for_wl_string(s: str) -> str:
+    """Escape a string for embedding in WL double-quoted string literal."""
+    return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def sanitize_context_name(username: str) -> str:
+    """Convert a username to a valid WL context name.
+
+    Only keeps ASCII letters, digits, and ``$``; prepends ``MCP$`` and
+    appends the context delimiter backtick.
+
+    Example: ``"alice"`` → ``"MCP$alice`"``
+    """
+    safe = "".join(c for c in username if c.isalnum() or c == "$")
+    if not safe:
+        safe = "anonymous"
+    return f"MCP${safe}`"

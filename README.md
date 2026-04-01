@@ -4,7 +4,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that w
 
 ## Features
 
-- **MCP Tools**: `evaluate`, `evaluate_image`, `solve`, `simplify`, `integrate`, `differentiate`
+- **MCP Tools**: `evaluate`, `evaluate_image`, `solve`, `simplify`, `integrate`, `differentiate`, `plot`, `data_query`, `query`
 - **Transports**: stdio (local) and Streamable HTTP (remote)
 - **Security**: Pre-kernel expression filtering with blacklist/whitelist modes and 20 capability groups
 - **Multi-user RBAC**: Per-user credentials, per-role tool and security policy control

@@ -19,7 +19,7 @@ def solve(ctx: ToolContext, equations: str, variables: str, numeric: bool = Fals
     result = ctx.kernel.evaluate_to_string(
         f"{fn}[{equations}, {variables}]",
         ctx.default_format,
-        timeout=ctx.timeout, hard_timeout=ctx.hard_timeout,
+        timeout=ctx.timeout, hard_timeout=ctx.hard_timeout, context=ctx.session_context,
     )
     return ctx.truncate(result)
 
