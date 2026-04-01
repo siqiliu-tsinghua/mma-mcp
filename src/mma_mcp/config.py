@@ -25,7 +25,9 @@ logger = logging.getLogger(__name__)
 class KernelConfig:
     mathkernel: str = ""        # path to MathKernel/WolframKernel; empty → auto
     wolframscript: str = ""     # path to wolframscript; empty → auto (used by setup)
-    timeout: int = 30           # per-evaluation timeout in seconds
+    timeout: int = 30           # WL-side TimeConstrained timeout in seconds; 0 = no limit
+    hard_timeout: int = 60      # Python-side hard timeout — force-restart kernel if stuck; 0 = no limit
+    max_result_size: int = 65536  # max result string length (chars); 0 = no limit
     default_format: str = "TeXForm"
 
 
@@ -175,11 +177,14 @@ def _find_config_file() -> tuple[Path, dict[str, Any]] | None:
 
 def _build_kernel_config(raw: dict[str, Any]) -> KernelConfig:
     sec = raw.get("kernel", {})
+    defaults = KernelConfig()
     return KernelConfig(
         mathkernel=sec.get("mathkernel", ""),
         wolframscript=sec.get("wolframscript", ""),
-        timeout=sec.get("timeout", 30),
-        default_format=sec.get("default_format", "TeXForm"),
+        timeout=sec.get("timeout", defaults.timeout),
+        hard_timeout=sec.get("hard_timeout", defaults.hard_timeout),
+        max_result_size=sec.get("max_result_size", defaults.max_result_size),
+        default_format=sec.get("default_format", defaults.default_format),
     )
 
 
@@ -268,6 +273,10 @@ def _validate(config: AppConfig) -> None:
     # kernel
     if config.kernel.timeout < 0:
         errors.append(f"kernel.timeout must be >= 0, got {config.kernel.timeout}")
+    if config.kernel.hard_timeout < 0:
+        errors.append(f"kernel.hard_timeout must be >= 0, got {config.kernel.hard_timeout}")
+    if config.kernel.max_result_size < 0:
+        errors.append(f"kernel.max_result_size must be >= 0, got {config.kernel.max_result_size}")
     valid_formats = {"TeXForm", "OutputForm", "InputForm", "StandardForm", "TraditionalForm"}
     if config.kernel.default_format not in valid_formats:
         errors.append(
@@ -393,8 +402,20 @@ mathkernel = ""
 # Leave empty to auto-detect via `which wolframscript`.
 wolframscript = ""
 
-# Per-evaluation timeout in seconds. 0 = no timeout.
+# Per-evaluation timeout in seconds (Wolfram Language TimeConstrained).
+# The kernel cooperatively aborts the computation and returns $Aborted.
+# 0 = no timeout.
 timeout = 30
+
+# Hard timeout in seconds — Python-side safety net.
+# If the kernel does not respond within this time (e.g. stuck in C code),
+# it is forcibly restarted. Should be larger than timeout. 0 = no limit.
+hard_timeout = 60
+
+# Maximum result string length in characters. Results exceeding this limit
+# are truncated with a warning. Prevents huge outputs from overwhelming
+# MCP responses. 0 = no limit.
+max_result_size = 65536
 
 # Default output format: TeXForm, OutputForm, InputForm, etc.
 default_format = "TeXForm"

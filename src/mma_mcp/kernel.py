@@ -7,6 +7,7 @@ kernel crash the session is automatically restarted and the call retried once.
 from __future__ import annotations
 
 import base64
+import concurrent.futures
 import logging
 import os
 import shutil
@@ -125,6 +126,10 @@ def _ensure_display() -> None:
     os.environ["DISPLAY"] = display
 
 
+class KernelTimeout(Exception):
+    """Raised when the kernel does not respond within the hard timeout."""
+
+
 class KernelSession:
     """Wraps a single WolframLanguageSession with auto-restart on crash."""
 
@@ -174,51 +179,82 @@ class KernelSession:
     # Evaluation
     # ------------------------------------------------------------------
 
-    def evaluate(self, expr: Any, *, retry: bool = True) -> Any:
+    def evaluate(self, expr: Any, *, retry: bool = True, hard_timeout: int = 0) -> Any:
         """Evaluate a WL expression. Returns the Python-converted result.
 
         Accepts anything wolframclient accepts: wl.* objects, wlexpr strings,
         or raw WL expression objects.
+
+        Args:
+            retry:        Retry once after kernel crash.
+            hard_timeout: Python-side hard timeout in seconds. If the kernel
+                          does not respond in time, it is force-restarted and
+                          ``KernelTimeout`` is raised. 0 = no limit.
         """
         self._ensure_started()
         try:
-            return self._session.evaluate(expr)
+            return self._evaluate_with_hard_timeout(expr, hard_timeout)
         except WolframKernelException:
             if retry:
                 logger.warning("Kernel exception — restarting and retrying once")
                 self.restart()
-                return self._session.evaluate(expr)
+                return self._evaluate_with_hard_timeout(expr, hard_timeout)
             raise
 
+    def _evaluate_with_hard_timeout(self, expr: Any, hard_timeout: int) -> Any:
+        """Run evaluation, with optional thread-based hard timeout."""
+        if hard_timeout <= 0:
+            return self._session.evaluate(expr)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(self._session.evaluate, expr)
+            try:
+                return future.result(timeout=hard_timeout)
+            except concurrent.futures.TimeoutError:
+                logger.error(
+                    "Kernel did not respond within %d seconds — force-restarting",
+                    hard_timeout,
+                )
+                self.restart()
+                raise KernelTimeout(
+                    f"Kernel did not respond within {hard_timeout} seconds "
+                    f"and was force-restarted"
+                )
+
     def evaluate_to_string(
-        self, expr_str: str, form: str = "TeXForm", timeout: int = 0,
+        self, expr_str: str, form: str = "TeXForm",
+        timeout: int = 0, hard_timeout: int = 0,
     ) -> str:
         """Evaluate a WL expression string and return the result as a string.
 
         Args:
-            expr_str: Wolfram Language expression.
-            form:     Output format (TeXForm, OutputForm, InputForm, …).
-            timeout:  Seconds. 0 means no timeout.
+            expr_str:     Wolfram Language expression.
+            form:         Output format (TeXForm, OutputForm, InputForm, …).
+            timeout:      WL-side TimeConstrained seconds. 0 = no limit.
+            hard_timeout: Python-side hard timeout seconds. 0 = no limit.
         """
         if timeout > 0:
             inner = f"TimeConstrained[{expr_str}, {timeout}]"
         else:
             inner = expr_str
         wrapped = wl.ToString(wlexpr(inner), wlexpr(form))
-        result = self.evaluate(wrapped)
+        result = self.evaluate(wrapped, hard_timeout=hard_timeout)
         if isinstance(result, str):
             return result
         return str(result)
 
-    def evaluate_to_image(self, expr_str: str, timeout: int = 0) -> bytes:
+    def evaluate_to_image(
+        self, expr_str: str, timeout: int = 0, hard_timeout: int = 0,
+    ) -> bytes:
         """Evaluate a WL expression and export the result as PNG bytes.
 
         Wraps the expression in Rasterize so that any Graphics/Plot output
         is captured even if the expression is not inherently graphical.
 
         Args:
-            expr_str: Wolfram Language expression.
-            timeout:  Seconds. 0 means no timeout.
+            expr_str:     Wolfram Language expression.
+            timeout:      WL-side TimeConstrained seconds. 0 = no limit.
+            hard_timeout: Python-side hard timeout seconds. 0 = no limit.
         """
         self._ensure_started()
         if timeout > 0:
@@ -234,7 +270,7 @@ class KernelSession:
             wl.Rasterize(wlexpr(inner), wlexpr('ImageResolution -> 144')),
             "PNG",
         )
-        self.evaluate(export_expr)
+        self.evaluate(export_expr, hard_timeout=hard_timeout)
         data = Path(tmp_path).read_bytes()
         Path(tmp_path).unlink(missing_ok=True)
         return data

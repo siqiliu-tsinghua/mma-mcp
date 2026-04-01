@@ -68,6 +68,8 @@ mma-mcp/
 - **Image output:** Export WL graphics via `Export[..., "PNG"]`, return as base64-encoded `ImageContent` in MCP responses.
 - **Result format:** Default to `OutputForm`; expose `TeXForm` and `StandardForm` as options.
 - **Error handling:** Catch `WolframKernelException`; auto-restart kernel on crash.
+- **Timeout:** Two-layer timeout — WL-side `TimeConstrained` (cooperative, configurable via `kernel.timeout`) + Python-side hard timeout via `ThreadPoolExecutor` (force-restart kernel, configurable via `kernel.hard_timeout`).
+- **Result size limit:** `kernel.max_result_size` truncates oversized results before returning to MCP client.
 
 ## Security Architecture
 

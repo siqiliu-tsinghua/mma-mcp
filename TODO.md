@@ -109,23 +109,26 @@
 
 - [ ] 会话隔离：`session_id` 支持多客户端独立上下文
 - [ ] 内核健康检查（定期 ping / 空闲超时回收）
-- [ ] 结果大小限制（防止巨大输出撑爆 MCP 响应）
+- [x] 结果大小限制（`max_result_size` 配置项，超限截断）
+- [x] Python 侧硬超时（`hard_timeout` 配置项，内核卡死时强制重启）
 - [ ] 日志完善（结构化日志、请求追踪）
 
 ## Phase 5: 部署与集成测试
 
 ### 测试
 
-- [ ] 安全过滤单元测试（黑名单/白名单、边界情况）
-- [ ] 工具层单元测试（mock 内核）
+- [x] 安全过滤单元测试（黑名单/白名单、边界情况）— 33 tests
+- [x] 工具层 + RBAC 单元测试（mock 内核）— 18 tests
+- [x] 认证 + OAuth + 密码哈希单元测试 — 20 tests
+- [x] 配置加载 + 校验单元测试 — 31 tests
 - [ ] 集成测试：真实内核 + MCP 协议端到端
 
 ### 部署
 
 - [x] Caddyfile.example（反向代理 + alidns DNS-01 证书）
 - [x] .mcp.json（VSCode / Claude Code 本地 stdio 配置）
-- [ ] systemd service 文件
-- [ ] 部署文档 / README.md
+- [x] systemd service 文件
+- [x] 部署文档 / README.md
 
 ### 客户端验证
 

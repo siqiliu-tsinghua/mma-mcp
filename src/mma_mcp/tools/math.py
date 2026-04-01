@@ -16,11 +16,12 @@ def solve(ctx: ToolContext, equations: str, variables: str, numeric: bool = Fals
     """
     ctx.check(equations, variables)
     fn = "NSolve" if numeric else "Solve"
-    return ctx.kernel.evaluate_to_string(
+    result = ctx.kernel.evaluate_to_string(
         f"{fn}[{equations}, {variables}]",
         ctx.default_format,
-        timeout=ctx.timeout,
+        timeout=ctx.timeout, hard_timeout=ctx.hard_timeout,
     )
+    return ctx.truncate(result)
 
 
 @register("simplify")
@@ -40,7 +41,10 @@ def simplify(ctx: ToolContext, expression: str, full: bool = False, assumptions:
         expr = f"{fn}[{expression}, {assumptions}]"
     else:
         expr = f"{fn}[{expression}]"
-    return ctx.kernel.evaluate_to_string(expr, ctx.default_format, timeout=ctx.timeout)
+    result = ctx.kernel.evaluate_to_string(
+        expr, ctx.default_format, timeout=ctx.timeout, hard_timeout=ctx.hard_timeout,
+    )
+    return ctx.truncate(result)
 
 
 @register("integrate")
@@ -69,7 +73,10 @@ def integrate(
         expr = f"{fn}[{expression}, {{{variable}, {lower}, {upper}}}]"
     else:
         expr = f"{fn}[{expression}, {variable}]"
-    return ctx.kernel.evaluate_to_string(expr, ctx.default_format, timeout=ctx.timeout)
+    result = ctx.kernel.evaluate_to_string(
+        expr, ctx.default_format, timeout=ctx.timeout, hard_timeout=ctx.hard_timeout,
+    )
+    return ctx.truncate(result)
 
 
 @register("differentiate")
@@ -86,4 +93,7 @@ def differentiate(ctx: ToolContext, expression: str, variable: str, order: int =
         expr = f"D[{expression}, {variable}]"
     else:
         expr = f"D[{expression}, {{{variable}, {order}}}]"
-    return ctx.kernel.evaluate_to_string(expr, ctx.default_format, timeout=ctx.timeout)
+    result = ctx.kernel.evaluate_to_string(
+        expr, ctx.default_format, timeout=ctx.timeout, hard_timeout=ctx.hard_timeout,
+    )
+    return ctx.truncate(result)

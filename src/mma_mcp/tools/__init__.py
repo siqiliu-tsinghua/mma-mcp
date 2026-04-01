@@ -129,8 +129,23 @@ class ToolContext:
         return self.config.kernel.timeout
 
     @property
+    def hard_timeout(self) -> int:
+        return self.config.kernel.hard_timeout
+
+    @property
+    def max_result_size(self) -> int:
+        return self.config.kernel.max_result_size
+
+    @property
     def default_format(self) -> str:
         return self.config.kernel.default_format
+
+    def truncate(self, result: str) -> str:
+        """Truncate result string if it exceeds max_result_size."""
+        limit = self.max_result_size
+        if limit > 0 and len(result) > limit:
+            return result[:limit] + f"\n\n[Truncated: result was {len(result)} chars, limit is {limit}]"
+        return result
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +194,7 @@ def _safe_wrapper(fn: Callable, ctx: ToolContext, tool_name: str) -> Callable:
     4. Catches SecurityError / WolframKernelException → user-friendly messages.
     """
     import inspect
+    from mma_mcp.kernel import KernelTimeout
     from mma_mcp.security.filter import SecurityError
     from wolframclient.exception import WolframKernelException
 
@@ -195,6 +211,9 @@ def _safe_wrapper(fn: Callable, ctx: ToolContext, tool_name: str) -> Callable:
         except SecurityError as e:
             logger.warning("Security: %s", e)
             return f"[Security Error] {e}"
+        except KernelTimeout as e:
+            logger.error("Kernel timeout: %s", e)
+            return f"[Timeout] {e}"
         except WolframKernelException as e:
             logger.error("Kernel error: %s", e)
             return f"[Kernel Error] {e}"

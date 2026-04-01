@@ -18,7 +18,10 @@ def evaluate(ctx: ToolContext, expression: str, form: str = "") -> str:
     """
     ctx.check(expression)
     fmt = form or ctx.default_format
-    return ctx.kernel.evaluate_to_string(expression, fmt, timeout=ctx.timeout)
+    result = ctx.kernel.evaluate_to_string(
+        expression, fmt, timeout=ctx.timeout, hard_timeout=ctx.hard_timeout,
+    )
+    return ctx.truncate(result)
 
 
 @register("evaluate_image")
@@ -31,5 +34,7 @@ def evaluate_image(ctx: ToolContext, expression: str) -> Image:
         expression: A valid Wolfram Language expression string.
     """
     ctx.check(expression)
-    png_bytes = ctx.kernel.evaluate_to_image(expression, timeout=ctx.timeout)
+    png_bytes = ctx.kernel.evaluate_to_image(
+        expression, timeout=ctx.timeout, hard_timeout=ctx.hard_timeout,
+    )
     return Image(data=png_bytes, format="png")

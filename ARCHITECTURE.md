@@ -91,7 +91,7 @@ mma-mcp 是一个 [Model Context Protocol (MCP)](https://modelcontextprotocol.io
 |------|------|------|
 | **Server** | `server.py` | `App` 类封装服务器全生命周期；CLI 入口 (`main`)；argparse 子命令；HTTP/stdio 启动 |
 | **Config** | `config.py` | TOML 配置加载/校验/默认值生成；所有 dataclass 定义（Kernel/Server/TLS/Security/Tools/Auth/Role/User） |
-| **Kernel** | `kernel.py` | `KernelSession` 管理 Wolfram 内核生命周期；自动探测内核路径；崩溃自动重启；Xvfb 虚拟显示 |
+| **Kernel** | `kernel.py` | `KernelSession` 管理 Wolfram 内核生命周期；自动探测内核路径；崩溃自动重启；Xvfb 虚拟显示；Python 侧硬超时（内核卡死时强制重启） |
 
 ### 安全模块
 
@@ -113,7 +113,7 @@ mma-mcp 是一个 [Model Context Protocol (MCP)](https://modelcontextprotocol.io
 
 | 模块 | 文件 | 职责 |
 |------|------|------|
-| **Registry** | `tools/__init__.py` | `@register` 装饰器 + `_REGISTRY`；`ToolContext` 运行时上下文；`RoleRuntime` 角色权限；`_safe_wrapper` 错误捕获 + RBAC |
+| **Registry** | `tools/__init__.py` | `@register` 装饰器 + `_REGISTRY`；`ToolContext` 运行时上下文（含结果截断）；`RoleRuntime` 角色权限；`_safe_wrapper` 错误捕获 + RBAC |
 | **Evaluate** | `tools/evaluate.py` | `evaluate`（文本结果）、`evaluate_image`（PNG 图片） |
 | **Math** | `tools/math.py` | `solve`、`simplify`、`integrate`、`differentiate` |
 
@@ -233,7 +233,7 @@ Internet → Caddy (TLS 终结, Let's Encrypt) → 127.0.0.1:8000 (mma-mcp HTTP)
 所有配置集中在 `mma_mcp.toml`（`mma-mcp init` 生成），结构如下：
 
 ```toml
-[kernel]        # 内核路径、超时、默认输出格式
+[kernel]        # 内核路径、超时（WL 侧 + Python 侧硬超时）、结果大小限制、默认输出格式
 [server]        # 传输模式、监听地址、旧式单密码认证
 [tls]           # HTTPS 域名、DNS 提供商（用于 Caddyfile 生成）
 [security]      # 全局安全策略：模式 + 分组 + 符号级覆盖
