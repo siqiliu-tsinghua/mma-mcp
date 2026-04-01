@@ -1,36 +1,26 @@
 """Capability registry: loads group JSON files and resolves security policy.
 
 Usage:
-    registry = CapabilityRegistry()           # loads built-in groups
-    registry.initialize_system_symbols(kernel_session)  # called once at startup
-    filt = registry.build_filter(config)      # build ExpressionFilter from config
+    from mma_mcp.config import SecurityConfig
+
+    registry = CapabilityRegistry()
+    registry.initialize_system_symbols(symbols)   # optional, once at startup
+    filt = registry.build_filter(config)           # build ExpressionFilter
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+
+from mma_mcp.config import SecurityConfig
 
 from .filter import ExpressionFilter
 
 logger = logging.getLogger(__name__)
 
 _GROUPS_DIR = Path(__file__).parent / "groups"
-
-
-@dataclass
-class SecurityConfig:
-    mode: Literal["blacklist", "whitelist"] = "blacklist"
-    # Groups to add to the active policy (blocked in blacklist / allowed in whitelist)
-    groups: list[str] = field(default_factory=list)
-    # Individual symbols to always block (regardless of mode)
-    extra_blocked: list[str] = field(default_factory=list)
-    # Individual symbols to always allow (whitelist mode only)
-    extra_allowed: list[str] = field(default_factory=list)
-
 
 # Default blacklist-mode groups — always blocked unless explicitly overridden
 _DEFAULT_BLACKLIST_GROUPS = [
@@ -58,6 +48,12 @@ _DEFAULT_WHITELIST_GROUPS = [
     "plotting_2d",
     "plotting_3d",
     "graphics",
+]
+
+# All dangerous group names (used to subtract from whitelist)
+_DANGEROUS_GROUPS = [
+    "system_exec", "dynamic_eval", "file_write",
+    "networking", "external_services", "file_read",
 ]
 
 
@@ -97,18 +93,15 @@ class CapabilityRegistry:
     # Policy resolution
     # ------------------------------------------------------------------
 
-    def build_filter(self, config: SecurityConfig | None = None) -> ExpressionFilter:
+    def build_filter(self, config: SecurityConfig) -> ExpressionFilter:
         """Return an ExpressionFilter configured according to *config*."""
-        if config is None:
-            config = SecurityConfig()
-
         if config.mode == "blacklist":
             return self._build_blacklist_filter(config)
         else:
             return self._build_whitelist_filter(config)
 
     def _build_blacklist_filter(self, config: SecurityConfig) -> ExpressionFilter:
-        groups = config.groups if config.groups else _DEFAULT_BLACKLIST_GROUPS
+        groups = config.deny_groups if config.deny_groups else _DEFAULT_BLACKLIST_GROUPS
         blocked: set[str] = set()
         for name in groups:
             blocked |= self._resolve_group(name)
@@ -119,18 +112,14 @@ class CapabilityRegistry:
         return ExpressionFilter("blacklist", frozenset(blocked))
 
     def _build_whitelist_filter(self, config: SecurityConfig) -> ExpressionFilter:
-        # Dangerous symbols = union of all dangerous groups
-        dangerous_groups = [
-            "system_exec", "dynamic_eval", "file_write",
-            "networking", "external_services", "file_read",
-        ]
+        # Dangerous symbols = union of all dangerous groups + extra_blocked
         dangerous: set[str] = set()
-        for name in dangerous_groups:
+        for name in _DANGEROUS_GROUPS:
             dangerous |= self._resolve_group(name)
         dangerous |= set(config.extra_blocked)
 
         # Allowed = explicitly configured groups (or defaults) + extra_allowed
-        groups = config.groups if config.groups else _DEFAULT_WHITELIST_GROUPS
+        groups = config.allow_groups if config.allow_groups else _DEFAULT_WHITELIST_GROUPS
         allowed: set[str] = set()
         for name in groups:
             allowed |= self._resolve_group(name)

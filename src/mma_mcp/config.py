@@ -1,0 +1,529 @@
+"""Unified configuration for mma-mcp.
+
+Configuration is loaded from (highest priority first):
+  1. mma_mcp.toml   — standalone config in current working directory
+  2. pyproject.toml  — [tool.mma-mcp] section
+
+Use ``mma-mcp init`` to generate a default mma_mcp.toml.
+"""
+
+from __future__ import annotations
+
+import logging
+import sys
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Data classes
+# ---------------------------------------------------------------------------
+
+@dataclass
+class KernelConfig:
+    mathkernel: str = ""        # path to MathKernel/WolframKernel; empty → auto
+    wolframscript: str = ""     # path to wolframscript; empty → auto (used by setup)
+    timeout: int = 30           # per-evaluation timeout in seconds
+    default_format: str = "TeXForm"
+
+
+@dataclass
+class ServerConfig:
+    transport: str = "stdio"    # "stdio" or "http"
+    host: str = "127.0.0.1"
+    port: int = 8000
+    auth_token_env: str = ""    # env var name holding the Bearer token; empty = no auth
+
+
+# Known DNS providers and their required environment variables
+DNS_PROVIDERS: dict[str, dict[str, Any]] = {
+    "alidns": {
+        "description": "Alibaba Cloud DNS",
+        "caddy_plugin": "github.com/caddy-dns/alidns",
+        "env_vars": ["ALIDNS_ACCESS_KEY_ID", "ALIDNS_ACCESS_KEY_SECRET"],
+    },
+    "cloudflare": {
+        "description": "Cloudflare DNS",
+        "caddy_plugin": "github.com/caddy-dns/cloudflare",
+        "env_vars": ["CLOUDFLARE_API_TOKEN"],
+    },
+    "dnspod": {
+        "description": "DNSPod (Tencent Cloud)",
+        "caddy_plugin": "github.com/caddy-dns/dnspod",
+        "env_vars": ["DNSPOD_API_TOKEN"],
+    },
+    "godaddy": {
+        "description": "GoDaddy DNS",
+        "caddy_plugin": "github.com/caddy-dns/godaddy",
+        "env_vars": ["GODADDY_API_KEY", "GODADDY_API_SECRET"],
+    },
+    "namecheap": {
+        "description": "Namecheap DNS",
+        "caddy_plugin": "github.com/caddy-dns/namecheap",
+        "env_vars": ["NAMECHEAP_API_KEY", "NAMECHEAP_API_USER"],
+    },
+}
+
+
+@dataclass
+class TlsConfig:
+    enabled: bool = False
+    domain: str = ""            # e.g. "mma-mcp.example.com"
+    dns_provider: str = ""      # key into DNS_PROVIDERS; empty = HTTP-01 challenge
+    # No API keys here — they come from environment variables.
+    # See DNS_PROVIDERS for which env vars each provider needs.
+
+
+@dataclass
+class SecurityConfig:
+    mode: str = "blacklist"     # "blacklist" or "whitelist"
+    deny_groups: list[str] = field(default_factory=lambda: [
+        "system_exec", "dynamic_eval", "file_write",
+        "file_read", "networking", "external_services",
+    ])
+    allow_groups: list[str] = field(default_factory=list)
+    extra_blocked: list[str] = field(default_factory=list)
+    extra_allowed: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ToolsConfig:
+    enabled: list[str] = field(default_factory=lambda: [
+        "evaluate",
+        "evaluate_image",
+        "solve",
+        "simplify",
+        "integrate",
+        "differentiate",
+    ])
+
+
+@dataclass
+class RoleConfig:
+    """Per-role permission overrides.
+
+    - tools: ``"*"`` = all tools, list = specific tools, ``""`` = inherit [tools].enabled
+    - security: ``"none"`` = skip filtering, ``"blacklist"``/``"whitelist"`` = per-role policy,
+                ``""`` = inherit global [security]
+    """
+    tools: list[str] | str = ""             # "*", list, or "" (inherit)
+    security: str = ""                      # "none", "blacklist", "whitelist", "" (inherit)
+    deny_groups: list[str] = field(default_factory=list)
+    allow_groups: list[str] = field(default_factory=list)
+    extra_blocked: list[str] = field(default_factory=list)
+    extra_allowed: list[str] = field(default_factory=list)
+
+
+@dataclass
+class UserConfig:
+    role: str = ""
+    password_hash: str = ""                 # format: scrypt:<salt_hex>:<hash_hex>
+
+
+@dataclass
+class AuthConfig:
+    enabled: bool = False
+    roles: dict[str, RoleConfig] = field(default_factory=dict)
+    users: dict[str, UserConfig] = field(default_factory=dict)
+
+
+@dataclass
+class AppConfig:
+    kernel: KernelConfig = field(default_factory=KernelConfig)
+    server: ServerConfig = field(default_factory=ServerConfig)
+    tls: TlsConfig = field(default_factory=TlsConfig)
+    security: SecurityConfig = field(default_factory=SecurityConfig)
+    tools: ToolsConfig = field(default_factory=ToolsConfig)
+    auth: AuthConfig = field(default_factory=AuthConfig)
+
+
+# ---------------------------------------------------------------------------
+# TOML loading
+# ---------------------------------------------------------------------------
+
+def _read_toml(path: Path) -> dict[str, Any]:
+    if sys.version_info >= (3, 11):
+        import tomllib
+    else:
+        import tomli as tomllib  # type: ignore[no-redef]
+    return tomllib.loads(path.read_text(encoding="utf-8"))
+
+
+def _find_config_file() -> tuple[Path, dict[str, Any]] | None:
+    """Locate and read the first available config source."""
+    standalone = Path("mma_mcp.toml")
+    if standalone.exists():
+        try:
+            return standalone, _read_toml(standalone)
+        except Exception:
+            logger.warning("Failed to parse %s", standalone, exc_info=True)
+
+    pyproject = Path("pyproject.toml")
+    if pyproject.exists():
+        try:
+            data = _read_toml(pyproject)
+            section = data.get("tool", {}).get("mma-mcp", {})
+            if section:
+                return pyproject, section
+        except Exception:
+            logger.warning("Failed to parse %s", pyproject, exc_info=True)
+
+    return None
+
+
+def _build_kernel_config(raw: dict[str, Any]) -> KernelConfig:
+    sec = raw.get("kernel", {})
+    return KernelConfig(
+        mathkernel=sec.get("mathkernel", ""),
+        wolframscript=sec.get("wolframscript", ""),
+        timeout=sec.get("timeout", 30),
+        default_format=sec.get("default_format", "TeXForm"),
+    )
+
+
+def _build_server_config(raw: dict[str, Any]) -> ServerConfig:
+    sec = raw.get("server", {})
+    return ServerConfig(
+        transport=sec.get("transport", "stdio"),
+        host=sec.get("host", "127.0.0.1"),
+        port=sec.get("port", 8000),
+        auth_token_env=sec.get("auth_token_env", ""),
+    )
+
+
+def _build_tls_config(raw: dict[str, Any]) -> TlsConfig:
+    sec = raw.get("tls", {})
+    return TlsConfig(
+        enabled=sec.get("enabled", False),
+        domain=sec.get("domain", ""),
+        dns_provider=sec.get("dns_provider", ""),
+    )
+
+
+def _build_security_config(raw: dict[str, Any]) -> SecurityConfig:
+    sec = raw.get("security", {})
+    defaults = SecurityConfig()
+    return SecurityConfig(
+        mode=sec.get("mode", defaults.mode),
+        deny_groups=sec.get("deny_groups", defaults.deny_groups),
+        allow_groups=sec.get("allow_groups", defaults.allow_groups),
+        extra_blocked=sec.get("extra_blocked", defaults.extra_blocked),
+        extra_allowed=sec.get("extra_allowed", defaults.extra_allowed),
+    )
+
+
+def _build_tools_config(raw: dict[str, Any]) -> ToolsConfig:
+    sec = raw.get("tools", {})
+    defaults = ToolsConfig()
+    return ToolsConfig(
+        enabled=sec.get("enabled", defaults.enabled),
+    )
+
+
+def _build_auth_config(raw: dict[str, Any]) -> AuthConfig:
+    sec = raw.get("auth", {})
+    if not sec or not sec.get("enabled", False):
+        return AuthConfig()
+
+    # Parse roles
+    roles: dict[str, RoleConfig] = {}
+    raw_roles = sec.get("roles", {})
+    for name, rdata in raw_roles.items():
+        if not isinstance(rdata, dict):
+            continue
+        tools_val = rdata.get("tools", "")
+        roles[name] = RoleConfig(
+            tools=tools_val,
+            security=rdata.get("security", ""),
+            deny_groups=rdata.get("deny_groups", []),
+            allow_groups=rdata.get("allow_groups", []),
+            extra_blocked=rdata.get("extra_blocked", []),
+            extra_allowed=rdata.get("extra_allowed", []),
+        )
+
+    # Parse users
+    users: dict[str, UserConfig] = {}
+    raw_users = sec.get("users", {})
+    for name, udata in raw_users.items():
+        if not isinstance(udata, dict):
+            continue
+        users[name] = UserConfig(
+            role=udata.get("role", ""),
+            password_hash=udata.get("password_hash", ""),
+        )
+
+    return AuthConfig(enabled=True, roles=roles, users=users)
+
+
+class ConfigError(ValueError):
+    """Raised when configuration is invalid."""
+
+
+def _validate(config: AppConfig) -> None:
+    """Validate config values. Raises ConfigError on problems."""
+    errors: list[str] = []
+
+    # kernel
+    if config.kernel.timeout < 0:
+        errors.append(f"kernel.timeout must be >= 0, got {config.kernel.timeout}")
+    valid_formats = {"TeXForm", "OutputForm", "InputForm", "StandardForm", "TraditionalForm"}
+    if config.kernel.default_format not in valid_formats:
+        errors.append(
+            f"kernel.default_format must be one of {sorted(valid_formats)}, "
+            f"got {config.kernel.default_format!r}"
+        )
+    if config.kernel.mathkernel and not Path(config.kernel.mathkernel).exists():
+        errors.append(f"kernel.mathkernel path does not exist: {config.kernel.mathkernel}")
+    if config.kernel.wolframscript and not Path(config.kernel.wolframscript).exists():
+        errors.append(f"kernel.wolframscript path does not exist: {config.kernel.wolframscript}")
+
+    # server
+    if config.server.transport not in ("stdio", "http"):
+        errors.append(
+            f"server.transport must be 'stdio' or 'http', got {config.server.transport!r}"
+        )
+    if not (1 <= config.server.port <= 65535):
+        errors.append(f"server.port must be 1-65535, got {config.server.port}")
+
+    # tls
+    if config.tls.enabled and not config.tls.domain:
+        errors.append("tls.domain is required when tls.enabled = true")
+    if config.tls.dns_provider and config.tls.dns_provider not in DNS_PROVIDERS:
+        supported = ", ".join(sorted(DNS_PROVIDERS))
+        errors.append(
+            f"tls.dns_provider {config.tls.dns_provider!r} not supported. "
+            f"Choose from: {supported}"
+        )
+
+    # security
+    if config.security.mode not in ("blacklist", "whitelist"):
+        errors.append(
+            f"security.mode must be 'blacklist' or 'whitelist', "
+            f"got {config.security.mode!r}"
+        )
+    # Warn about unknown group names (non-fatal — logged as warning)
+    known_groups = set()
+    groups_dir = Path(__file__).parent / "security" / "groups"
+    if groups_dir.is_dir():
+        known_groups = {p.stem for p in groups_dir.glob("*.json") if p.stem != "manifest"}
+    for group_list_name in ("deny_groups", "allow_groups"):
+        for g in getattr(config.security, group_list_name):
+            if known_groups and g not in known_groups:
+                logger.warning(
+                    "security.%s contains unknown group %r (available: %s)",
+                    group_list_name, g, sorted(known_groups),
+                )
+
+    # auth
+    if config.auth.enabled:
+        if not config.auth.users:
+            errors.append("auth.enabled is true but no users are defined")
+        if not config.auth.roles:
+            errors.append("auth.enabled is true but no roles are defined")
+        role_names = set(config.auth.roles)
+        for uname, uconf in config.auth.users.items():
+            if not uconf.role:
+                errors.append(f"auth.users.{uname}: role is required")
+            elif uconf.role not in role_names:
+                errors.append(
+                    f"auth.users.{uname}: role {uconf.role!r} not defined "
+                    f"(available: {sorted(role_names)})"
+                )
+            if not uconf.password_hash:
+                errors.append(f"auth.users.{uname}: password_hash is required")
+            elif not uconf.password_hash.startswith("scrypt:") or uconf.password_hash.count(":") != 2:
+                errors.append(
+                    f"auth.users.{uname}: password_hash must be "
+                    f"'scrypt:<salt_hex>:<hash_hex>'"
+                )
+        valid_sec_modes = {"", "none", "blacklist", "whitelist"}
+        for rname, rconf in config.auth.roles.items():
+            if rconf.security not in valid_sec_modes:
+                errors.append(
+                    f"auth.roles.{rname}: security must be one of "
+                    f"{sorted(valid_sec_modes - {''})!r} or omitted, "
+                    f"got {rconf.security!r}"
+                )
+
+    if errors:
+        msg = "Configuration errors:\n" + "\n".join(f"  - {e}" for e in errors)
+        raise ConfigError(msg)
+
+
+def load_config() -> AppConfig:
+    """Load configuration from the first available source, or return defaults."""
+    result = _find_config_file()
+    if result is None:
+        logger.info("No config file found, using defaults")
+        return AppConfig()
+
+    path, raw = result
+    logger.info("Loaded config from %s", path)
+    config = AppConfig(
+        kernel=_build_kernel_config(raw),
+        server=_build_server_config(raw),
+        tls=_build_tls_config(raw),
+        security=_build_security_config(raw),
+        tools=_build_tools_config(raw),
+        auth=_build_auth_config(raw),
+    )
+    _validate(config)
+    return config
+
+
+# ---------------------------------------------------------------------------
+# Default config generation (mma-mcp init)
+# ---------------------------------------------------------------------------
+
+_DEFAULT_TOML = """\
+# mma-mcp configuration file
+# Generated by: mma-mcp init
+# Documentation: see CLAUDE.md
+
+# ─── Wolfram Kernel ──────────────────────────────────────────────────────────
+
+[kernel]
+# Path to MathKernel / WolframKernel binary.
+# Leave empty to auto-detect (searches WOLFRAM_KERNEL env → which → common paths).
+mathkernel = ""
+
+# Path to wolframscript binary. Used by `mma-mcp setup` to generate symbol groups.
+# Leave empty to auto-detect via `which wolframscript`.
+wolframscript = ""
+
+# Per-evaluation timeout in seconds. 0 = no timeout.
+timeout = 30
+
+# Default output format: TeXForm, OutputForm, InputForm, etc.
+default_format = "TeXForm"
+
+# ─── Server Transport ────────────────────────────────────────────────────────
+
+[server]
+# Transport mode: "stdio" (local MCP clients) or "http" (remote clients via HTTPS)
+transport = "stdio"
+
+# HTTP listen address (only used when transport = "http")
+# Use 127.0.0.1 behind a reverse proxy; use 0.0.0.0 for direct exposure (not recommended)
+host = "127.0.0.1"
+port = 8000
+
+# Bearer token authentication (HTTP transport only).
+# Set to the name of an environment variable that holds the secret token.
+# Requests must include "Authorization: Bearer <token>" header.
+# Leave empty to disable auth (e.g. when Caddy handles auth upstream).
+# auth_token_env = "MMA_MCP_AUTH_TOKEN"
+
+# ─── TLS / Reverse Proxy ─────────────────────────────────────────────────────
+# Only relevant when server.transport = "http".
+# mma-mcp can generate a Caddyfile for automatic HTTPS via Let's Encrypt.
+
+[tls]
+enabled = false
+
+# Your public domain, e.g. "mma-mcp.example.com"
+domain = ""
+
+# DNS provider for DNS-01 ACME challenge (no need to open port 80).
+# Leave empty to use HTTP-01 challenge (requires port 80 open).
+#
+# Supported providers:
+#   "alidns"     — Alibaba Cloud DNS    (env: ALIDNS_ACCESS_KEY_ID, ALIDNS_ACCESS_KEY_SECRET)
+#   "cloudflare" — Cloudflare DNS       (env: CLOUDFLARE_API_TOKEN)
+#   "dnspod"     — DNSPod / Tencent     (env: DNSPOD_API_TOKEN)
+#   "godaddy"    — GoDaddy DNS          (env: GODADDY_API_KEY, GODADDY_API_SECRET)
+#   "namecheap"  — Namecheap DNS        (env: NAMECHEAP_API_KEY, NAMECHEAP_API_USER)
+#
+# API credentials are NEVER stored in this file — set them as environment
+# variables or in a systemd EnvironmentFile. See docs for details.
+dns_provider = ""
+
+# ─── Security ─────────────────────────────────────────────────────────────────
+
+[security]
+# Security mode: "blacklist" (deny listed groups) or "whitelist" (allow listed groups only)
+mode = "blacklist"
+
+# Blacklist mode: groups whose symbols are forbidden.
+deny_groups = [
+    "system_exec",
+    "dynamic_eval",
+    "file_write",
+    "file_read",
+    "networking",
+    "external_services",
+]
+
+# Whitelist mode: only these groups' symbols are allowed.
+# Used when mode = "whitelist". Example:
+# allow_groups = [
+#     "arithmetic",
+#     "algebra",
+#     "calculus",
+#     "linear_algebra",
+#     "statistics",
+#     "number_theory",
+#     "special_functions",
+#     "combinatorics",
+#     "list_ops",
+#     "string_ops",
+#     "programming",
+#     "plotting_2d",
+#     "plotting_3d",
+#     "graphics",
+# ]
+
+# Fine-grained overrides (optional)
+# extra_blocked = ["Symbol1", "Symbol2"]
+# extra_allowed = ["Symbol3"]
+
+# ─── MCP Tools ────────────────────────────────────────────────────────────────
+
+[tools]
+# MCP tools to expose to clients. Remove a line to disable that tool.
+enabled = [
+    "evaluate",
+    "evaluate_image",
+    "solve",
+    "simplify",
+    "integrate",
+    "differentiate",
+]
+
+# ─── Authentication & Roles ─────────────────────────────────────────────────
+# Multi-user auth with role-based access control.
+# Enable this section for public-facing HTTP deployments.
+# Generate password hashes with: mma-mcp hash-password
+
+# [auth]
+# enabled = true
+#
+# [auth.roles.admin]
+# tools = "*"              # all tools
+# security = "none"        # no symbol filtering
+#
+# [auth.roles.standard]
+# # Inherits [tools].enabled and [security] settings (nothing to configure)
+#
+# [auth.roles.analyst]
+# tools = ["evaluate", "evaluate_image", "solve", "integrate"]
+# security = "whitelist"
+# allow_groups = ["arithmetic", "algebra", "calculus", "statistics", "plotting_2d"]
+#
+# [auth.users.alice]
+# role = "admin"
+# password_hash = "scrypt:<salt_hex>:<hash_hex>"
+#
+# [auth.users.bob]
+# role = "analyst"
+# password_hash = "scrypt:<salt_hex>:<hash_hex>"
+"""
+
+
+def generate_default_config(target: Path | None = None) -> Path:
+    """Write a default mma_mcp.toml and return its path."""
+    target = target or Path("mma_mcp.toml")
+    target.write_text(_DEFAULT_TOML, encoding="utf-8")
+    return target

@@ -72,6 +72,20 @@ def find_kernel(hint: str | None = None) -> str | None:
     return None
 
 
+def find_wolframscript(hint: str | None = None) -> str | None:
+    """Locate wolframscript binary.
+
+    Resolution order:
+      1. *hint* (explicit path from config)
+      2. ``shutil.which("wolframscript")``
+
+    Returns the first path that exists, or None.
+    """
+    if hint and Path(hint).exists():
+        return hint
+    return shutil.which("wolframscript")
+
+
 def _ensure_display() -> None:
     """Ensure a DISPLAY is available for graphics rendering.
 
@@ -176,27 +190,48 @@ class KernelSession:
                 return self._session.evaluate(expr)
             raise
 
-    def evaluate_to_string(self, expr_str: str, form: str = "OutputForm") -> str:
-        """Evaluate a WL expression string and return the result as a string."""
-        wrapped = wl.ToString(wlexpr(expr_str), wlexpr(form))
+    def evaluate_to_string(
+        self, expr_str: str, form: str = "TeXForm", timeout: int = 0,
+    ) -> str:
+        """Evaluate a WL expression string and return the result as a string.
+
+        Args:
+            expr_str: Wolfram Language expression.
+            form:     Output format (TeXForm, OutputForm, InputForm, …).
+            timeout:  Seconds. 0 means no timeout.
+        """
+        if timeout > 0:
+            inner = f"TimeConstrained[{expr_str}, {timeout}]"
+        else:
+            inner = expr_str
+        wrapped = wl.ToString(wlexpr(inner), wlexpr(form))
         result = self.evaluate(wrapped)
         if isinstance(result, str):
             return result
         return str(result)
 
-    def evaluate_to_image(self, expr_str: str) -> bytes:
+    def evaluate_to_image(self, expr_str: str, timeout: int = 0) -> bytes:
         """Evaluate a WL expression and export the result as PNG bytes.
 
         Wraps the expression in Rasterize so that any Graphics/Plot output
         is captured even if the expression is not inherently graphical.
+
+        Args:
+            expr_str: Wolfram Language expression.
+            timeout:  Seconds. 0 means no timeout.
         """
         self._ensure_started()
+        if timeout > 0:
+            inner = f"TimeConstrained[{expr_str}, {timeout}]"
+        else:
+            inner = expr_str
+
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
             tmp_path = f.name
 
         export_expr = wl.Export(
             tmp_path,
-            wl.Rasterize(wlexpr(expr_str), wlexpr('ImageResolution -> 144')),
+            wl.Rasterize(wlexpr(inner), wlexpr('ImageResolution -> 144')),
             "PNG",
         )
         self.evaluate(export_expr)
