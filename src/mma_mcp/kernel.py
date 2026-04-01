@@ -87,6 +87,14 @@ def find_wolframscript(hint: str | None = None) -> str | None:
     return shutil.which("wolframscript")
 
 
+_display_available: bool = False
+
+
+def display_available() -> bool:
+    """Return True if a DISPLAY has been set up for graphics rendering."""
+    return _display_available
+
+
 def _ensure_display() -> None:
     """Ensure a DISPLAY is available for graphics rendering.
 
@@ -100,7 +108,9 @@ def _ensure_display() -> None:
     # plugin may fail even with Xvfb.  "offscreen" works reliably.
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+    global _display_available
     if os.environ.get("DISPLAY"):
+        _display_available = True
         return
     if not shutil.which("Xvfb"):
         logger.warning(
@@ -130,6 +140,7 @@ def _ensure_display() -> None:
             logger.warning("Failed to start Xvfb", exc_info=True)
             return
     os.environ["DISPLAY"] = display
+    _display_available = True
 
 
 class KernelTimeout(Exception):
@@ -265,6 +276,12 @@ class KernelSession:
             context:      WL context for session isolation.
         """
         self._ensure_started()
+        if not _display_available:
+            raise RuntimeError(
+                "Graphics rendering unavailable: no DISPLAY set and Xvfb not found. "
+                "Install xvfb: sudo apt-get install -y xvfb libfontconfig1 "
+                "fonts-dejavu-core libxkbcommon0 libegl1"
+            )
         inner = _wrap_context(expr_str, context)
         if timeout > 0:
             inner = f"TimeConstrained[{inner}, {timeout}]"
