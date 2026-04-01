@@ -29,327 +29,346 @@ from mma_mcp.tools import RoleRuntime, ToolContext, register_tools, get_register
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Singletons (initialized lazily or at startup)
-# ---------------------------------------------------------------------------
-
-_config: AppConfig | None = None
-_kernel: KernelSession | None = None
-_ctx: ToolContext | None = None
-
-
-def _get_config() -> AppConfig:
-    global _config
-    if _config is None:
-        _config = load_config()
-    return _config
-
-
-def _get_kernel(config: AppConfig) -> KernelSession:
-    """Create (but don't start) a KernelSession. Lazy start happens on first use."""
-    global _kernel
-    if _kernel is not None:
-        return _kernel
-
-    kernel_path = find_kernel(config.kernel.mathkernel or None)
-    _kernel = KernelSession(kernel=kernel_path)
-    return _kernel
-
 
 # ---------------------------------------------------------------------------
-# Role runtime building
+# App — encapsulates all server state (replaces global singletons)
 # ---------------------------------------------------------------------------
 
-def _build_role_runtimes(
-    config: AppConfig,
-    registry: CapabilityRegistry,
-) -> dict[str, RoleRuntime]:
-    """Build per-role permission sets and security filters."""
-    # Ensure tool modules are imported so _REGISTRY is populated
-    from mma_mcp.tools import evaluate, math  # noqa: F401
-    all_tool_names = frozenset(get_registered())
+class App:
+    """Encapsulates server state: config, kernel, context, MCP server.
 
-    runtimes: dict[str, RoleRuntime] = {}
-    for role_name, role_conf in config.auth.roles.items():
-        # --- Resolve allowed tools ---
-        if role_conf.tools == "*":
-            allowed = all_tool_names
-        elif isinstance(role_conf.tools, list) and role_conf.tools:
-            allowed = frozenset(role_conf.tools)
-        else:
-            # Inherit from global [tools].enabled
-            allowed = frozenset(config.tools.enabled)
-
-        # --- Resolve security filter ---
-        if role_conf.security == "none":
-            expr_filter = None  # skip filtering
-        elif role_conf.security in ("blacklist", "whitelist"):
-            sec = SecurityConfig(
-                mode=role_conf.security,
-                deny_groups=role_conf.deny_groups,
-                allow_groups=role_conf.allow_groups,
-                extra_blocked=role_conf.extra_blocked,
-                extra_allowed=role_conf.extra_allowed,
-            )
-            expr_filter = registry.build_filter(sec)
-        else:
-            # Inherit global [security] settings
-            expr_filter = registry.build_filter(config.security)
-
-        runtimes[role_name] = RoleRuntime(
-            allowed_tools=allowed,
-            expr_filter=expr_filter,
-        )
-        logger.info(
-            "Role %s: %d tools, security=%s",
-            role_name, len(allowed),
-            role_conf.security or "inherit",
-        )
-
-    return runtimes
-
-
-# ---------------------------------------------------------------------------
-# Context building
-# ---------------------------------------------------------------------------
-
-def _build_context(config: AppConfig) -> ToolContext:
-    """Build the ToolContext. Kernel is NOT started here — it starts lazily."""
-    global _ctx
-    if _ctx is not None:
-        return _ctx
-
-    registry = CapabilityRegistry()
-    expr_filter = registry.build_filter(config.security)
-    logger.info("Security filter ready (mode: %s)", config.security.mode)
-
-    kernel = _get_kernel(config)
-
-    # Build per-role runtimes if multi-user auth is enabled
-    role_runtimes: dict[str, RoleRuntime] = {}
-    if config.auth.enabled:
-        role_runtimes = _build_role_runtimes(config, registry)
-        logger.info("Built %d role runtimes", len(role_runtimes))
-
-    _ctx = ToolContext(
-        config=config,
-        kernel=kernel,
-        expr_filter=expr_filter,
-        registry=registry,
-        role_runtimes=role_runtimes,
-    )
-    return _ctx
-
-
-# ---------------------------------------------------------------------------
-# FastMCP server
-# ---------------------------------------------------------------------------
-
-def _create_server() -> FastMCP:
-    """Create and configure the FastMCP server with tools from config."""
-    config = _get_config()
-    ctx = _build_context(config)
-    mcp = FastMCP("mma-mcp")
-
-    if config.auth.enabled and ctx.role_runtimes:
-        # Register the union of all tools any role can use
-        all_role_tools: set[str] = set()
-        for rt in ctx.role_runtimes.values():
-            all_role_tools |= rt.allowed_tools
-        enabled = sorted(all_role_tools)
-    else:
-        enabled = config.tools.enabled
-
-    registered = register_tools(mcp, ctx, enabled)
-    logger.info("Server ready with %d tools: %s", len(registered), registered)
-    return mcp
-
-
-# ---------------------------------------------------------------------------
-# HTTP auth setup
-# ---------------------------------------------------------------------------
-
-def _setup_http_auth(config: AppConfig, app):  # noqa: ANN001
-    """Mount OAuth routes and auth middleware on the Starlette app.
-
-    Supports two modes:
-      1. Multi-user (config.auth.enabled) — OAuth + base64(user:pass)
-      2. Legacy single-token (config.server.auth_token_env) — static Bearer
+    Using a class instead of module-level globals makes it easy to create
+    isolated instances for testing or running multiple servers.
     """
-    from mma_mcp.auth import BearerAuthMiddleware
-    from mma_mcp.oauth import OAuthServer
 
-    if config.auth.enabled:
-        # Multi-user OAuth
-        oauth_server = OAuthServer(auth_config=config.auth)
+    def __init__(self, config: AppConfig | None = None) -> None:
+        self.config = config or load_config()
+        self._kernel: KernelSession | None = None
+        self._ctx: ToolContext | None = None
+        self._mcp: FastMCP | None = None
+
+    # ------------------------------------------------------------------
+    # Lazy-init components
+    # ------------------------------------------------------------------
+
+    @property
+    def kernel(self) -> KernelSession:
+        if self._kernel is None:
+            kernel_path = find_kernel(self.config.kernel.mathkernel or None)
+            self._kernel = KernelSession(kernel=kernel_path)
+        return self._kernel
+
+    @property
+    def ctx(self) -> ToolContext:
+        if self._ctx is None:
+            self._ctx = self._build_context()
+        return self._ctx
+
+    @property
+    def mcp(self) -> FastMCP:
+        if self._mcp is None:
+            self._mcp = self._create_server()
+        return self._mcp
+
+    # ------------------------------------------------------------------
+    # Internal builders
+    # ------------------------------------------------------------------
+
+    def _build_role_runtimes(
+        self, registry: CapabilityRegistry,
+    ) -> dict[str, RoleRuntime]:
+        """Build per-role permission sets and security filters."""
+        from mma_mcp.tools import evaluate, math  # noqa: F401
+        all_tool_names = frozenset(get_registered())
+        config = self.config
+
+        runtimes: dict[str, RoleRuntime] = {}
+        for role_name, role_conf in config.auth.roles.items():
+            # Resolve allowed tools
+            if role_conf.tools == "*":
+                allowed = all_tool_names
+            elif isinstance(role_conf.tools, list) and role_conf.tools:
+                allowed = frozenset(role_conf.tools)
+            else:
+                allowed = frozenset(config.tools.enabled)
+
+            # Resolve security filter
+            if role_conf.security == "none":
+                expr_filter = None
+            elif role_conf.security in ("blacklist", "whitelist"):
+                sec = SecurityConfig(
+                    mode=role_conf.security,
+                    deny_groups=role_conf.deny_groups,
+                    allow_groups=role_conf.allow_groups,
+                    extra_blocked=role_conf.extra_blocked,
+                    extra_allowed=role_conf.extra_allowed,
+                )
+                expr_filter = registry.build_filter(sec)
+            else:
+                expr_filter = registry.build_filter(config.security)
+
+            runtimes[role_name] = RoleRuntime(
+                allowed_tools=allowed, expr_filter=expr_filter,
+            )
+            logger.info(
+                "Role %s: %d tools, security=%s",
+                role_name, len(allowed), role_conf.security or "inherit",
+            )
+        return runtimes
+
+    def _build_context(self) -> ToolContext:
+        """Build the ToolContext. Kernel is NOT started here — lazy start on first use."""
+        registry = CapabilityRegistry()
+        expr_filter = registry.build_filter(self.config.security)
+        logger.info("Security filter ready (mode: %s)", self.config.security.mode)
+
+        role_runtimes: dict[str, RoleRuntime] = {}
+        if self.config.auth.enabled:
+            role_runtimes = self._build_role_runtimes(registry)
+            logger.info("Built %d role runtimes", len(role_runtimes))
+
+        return ToolContext(
+            config=self.config,
+            kernel=self.kernel,
+            expr_filter=expr_filter,
+            registry=registry,
+            role_runtimes=role_runtimes,
+        )
+
+    def _create_server(self) -> FastMCP:
+        """Create and configure the FastMCP server with tools from config."""
+        ctx = self.ctx
+        mcp = FastMCP("mma-mcp")
+
+        if self.config.auth.enabled and ctx.role_runtimes:
+            all_role_tools: set[str] = set()
+            for rt in ctx.role_runtimes.values():
+                all_role_tools |= rt.allowed_tools
+            enabled = sorted(all_role_tools)
+        else:
+            enabled = self.config.tools.enabled
+
+        registered = register_tools(mcp, ctx, enabled)
+        logger.info("Server ready with %d tools: %s", len(registered), registered)
+        return mcp
+
+    # ------------------------------------------------------------------
+    # HTTP auth setup
+    # ------------------------------------------------------------------
+
+    def setup_http_auth(self, app) -> None:  # noqa: ANN001
+        """Mount OAuth routes and auth middleware on the Starlette app."""
+        from mma_mcp.auth import BearerAuthMiddleware
+        from mma_mcp.oauth import OAuthServer
+
+        if self.config.auth.enabled:
+            oauth_server = OAuthServer(auth_config=self.config.auth)
+            for route in oauth_server.routes():
+                app.routes.insert(0, route)
+            app.add_middleware(
+                BearerAuthMiddleware,
+                oauth_server=oauth_server,
+                auth_config=self.config.auth,
+            )
+            logger.info(
+                "Multi-user auth enabled (%d users, %d roles)",
+                len(self.config.auth.users), len(self.config.auth.roles),
+            )
+            return
+
+        token_env = self.config.server.auth_token_env
+        if not token_env:
+            return
+
+        token = os.environ.get(token_env, "")
+        if not token:
+            logger.error(
+                "server.auth_token_env=%r is set but the env var is empty — "
+                "refusing to start without a token",
+                token_env,
+            )
+            sys.exit(1)
+
+        oauth_server = OAuthServer(password=token)
         for route in oauth_server.routes():
             app.routes.insert(0, route)
         app.add_middleware(
-            BearerAuthMiddleware,
-            oauth_server=oauth_server,
-            auth_config=config.auth,
+            BearerAuthMiddleware, token=token, oauth_server=oauth_server,
         )
-        logger.info("Multi-user auth enabled (%d users, %d roles)",
-                     len(config.auth.users), len(config.auth.roles))
-        return
+        logger.info("Legacy single-token auth enabled (env: %s)", token_env)
 
-    # Legacy single-token mode
-    token_env = config.server.auth_token_env
-    if not token_env:
-        return  # No auth
+    # ------------------------------------------------------------------
+    # Run
+    # ------------------------------------------------------------------
 
-    token = os.environ.get(token_env, "")
-    if not token:
-        logger.error(
-            "server.auth_token_env=%r is set but the env var is empty — "
-            "refusing to start without a token",
-            token_env,
-        )
-        sys.exit(1)
+    def run(self, transport: str = "", host: str = "", port: int = 0) -> None:
+        """Start the server with the given (or config-default) parameters."""
+        transport = transport or self.config.server.transport
+        host = host or self.config.server.host
+        port = port or self.config.server.port
 
-    oauth_server = OAuthServer(password=token)
-    for route in oauth_server.routes():
-        app.routes.insert(0, route)
-    app.add_middleware(
-        BearerAuthMiddleware, token=token, oauth_server=oauth_server,
-    )
-    logger.info("Legacy single-token auth enabled (env: %s)", token_env)
+        mcp = self.mcp
+
+        if transport == "http":
+            import uvicorn
+
+            app = mcp.streamable_http_app()
+            self.setup_http_auth(app)
+
+            logger.info("Starting HTTP transport on %s:%d", host, port)
+            uvi_config = uvicorn.Config(app, host=host, port=port, log_level="info")
+            uvicorn.Server(uvi_config).run()
+        else:
+            async def run_stdio() -> None:
+                async with stdio_transport() as (read_stream, write_stream):
+                    await mcp._mcp_server.run(  # type: ignore[attr-defined]
+                        read_stream,
+                        write_stream,
+                        mcp._mcp_server.create_initialization_options(),  # type: ignore[attr-defined]
+                    )
+
+            anyio.run(run_stdio)
 
 
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
+def _build_parser() -> "argparse.ArgumentParser":
+    """Build the top-level CLI parser with subcommands."""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="mma-mcp",
+        description="Wolfram Engine MCP server",
+    )
+    sub = parser.add_subparsers(dest="command")
+
+    # --- serve (default when no subcommand) ---
+    serve = sub.add_parser("serve", help="Start the MCP server (default)")
+    serve.add_argument(
+        "--transport", choices=["stdio", "http"], default=None,
+        help="Transport mode (overrides config)",
+    )
+    serve.add_argument("--host", default=None, help="HTTP listen host")
+    serve.add_argument("--port", type=int, default=None, help="HTTP listen port")
+
+    # --- init ---
+    sub.add_parser("init", help="Generate a default mma_mcp.toml")
+
+    # --- setup ---
+    sub.add_parser("setup", help="Regenerate security group JSON files from local kernel")
+
+    # --- caddyfile ---
+    sub.add_parser("caddyfile", help="Generate a Caddyfile for reverse proxy + HTTPS")
+
+    # --- hash-password ---
+    sub.add_parser("hash-password", help="Hash a password for use in config")
+
+    # --- add-user ---
+    add_user = sub.add_parser(
+        "add-user", help="Generate a TOML user entry (paste into mma_mcp.toml)",
+    )
+    add_user.add_argument("username", nargs="?", help="Username")
+    add_user.add_argument("--role", required=True, help="Role name")
+
+    return parser
+
+
 def main() -> None:
     import argparse
 
-    # --- "setup" subcommand ---
-    if len(sys.argv) > 1 and sys.argv[1] == "setup":
-        logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
-        from mma_mcp.setup_groups import run_setup
-        config = load_config()
-        run_setup(kernel_path=config.kernel.mathkernel or None)
-        return
+    parser = _build_parser()
 
-    # --- "init" subcommand ---
-    if len(sys.argv) > 1 and sys.argv[1] == "init":
-        path = generate_default_config()
-        print(f"Generated default config: {path}")
-        return
+    # Default to "serve" when no subcommand is given.
+    # Detect this by checking whether argv[1] looks like a subcommand.
+    known_commands = {"serve", "init", "setup", "caddyfile", "hash-password", "add-user"}
+    if len(sys.argv) < 2 or sys.argv[1] not in known_commands:
+        # Insert "serve" so argparse treats bare flags as serve args
+        sys.argv.insert(1, "serve")
 
-    # --- "caddyfile" subcommand ---
-    if len(sys.argv) > 1 and sys.argv[1] == "caddyfile":
-        config = load_config()
-        if not config.tls.domain:
-            print("Error: tls.domain must be set in config to generate a Caddyfile")
-            sys.exit(1)
-        from mma_mcp.caddyfile import generate_caddyfile
-        path = generate_caddyfile(config)
-        print(f"Generated Caddyfile: {path}")
-        if config.tls.dns_provider:
-            from mma_mcp.config import DNS_PROVIDERS
-            info = DNS_PROVIDERS.get(config.tls.dns_provider, {})
-            plugin = info.get("caddy_plugin", "")
-            env_vars = info.get("env_vars", [])
-            print(f"\nDNS provider: {config.tls.dns_provider}")
-            print(f"Build Caddy:  xcaddy build --with {plugin}")
-            print(f"Required env: {', '.join(env_vars)}")
-        else:
-            print("\nUsing HTTP-01 challenge (port 80 must be open)")
-        return
-
-    # --- "hash-password" subcommand ---
-    if len(sys.argv) > 1 and sys.argv[1] == "hash-password":
-        import getpass
-        from mma_mcp.passwords import hash_password
-        pwd = getpass.getpass("Password: ")
-        pwd2 = getpass.getpass("Confirm:  ")
-        if pwd != pwd2:
-            print("Error: passwords do not match", file=sys.stderr)
-            sys.exit(1)
-        print(hash_password(pwd))
-        return
-
-    # --- "add-user" subcommand ---
-    if len(sys.argv) > 1 and sys.argv[1] == "add-user":
-        _cmd_add_user()
-        return
-
-    # --- Normal server start ---
-    config = _get_config()
-
-    parser = argparse.ArgumentParser(description="mma-mcp Wolfram Engine MCP server")
-    parser.add_argument(
-        "--transport",
-        choices=["stdio", "http"],
-        default=None,
-        help=f"Transport mode (config default: {config.server.transport})",
-    )
-    parser.add_argument(
-        "--host",
-        default=None,
-        help=f"HTTP listen host (config default: {config.server.host})",
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=None,
-        help=f"HTTP listen port (config default: {config.server.port})",
-    )
     args = parser.parse_args()
 
-    # CLI overrides config
-    transport = args.transport or config.server.transport
-    host = args.host or config.server.host
-    port = args.port or config.server.port
+    if args.command == "init":
+        _cmd_init()
+    elif args.command == "setup":
+        _cmd_setup()
+    elif args.command == "caddyfile":
+        _cmd_caddyfile()
+    elif args.command == "hash-password":
+        _cmd_hash_password()
+    elif args.command == "add-user":
+        _cmd_add_user(args)
+    else:
+        _cmd_serve(args)
 
+
+# ---------------------------------------------------------------------------
+# Subcommand handlers
+# ---------------------------------------------------------------------------
+
+def _cmd_serve(args) -> None:  # noqa: ANN001
+    """Start the MCP server."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         stream=sys.stderr,
     )
+    app = App()
+    app.run(
+        transport=args.transport or "",
+        host=args.host or "",
+        port=args.port or 0,
+    )
 
-    mcp = _create_server()
 
-    if transport == "http":
-        import uvicorn
+def _cmd_init() -> None:
+    path = generate_default_config()
+    print(f"Generated default config: {path}")
 
-        app = mcp.streamable_http_app()
-        _setup_http_auth(config, app)
 
-        logger.info("Starting HTTP transport on %s:%d", host, port)
-        uvi_config = uvicorn.Config(app, host=host, port=port, log_level="info")
-        uvicorn.Server(uvi_config).run()
+def _cmd_setup() -> None:
+    logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
+    from mma_mcp.setup_groups import run_setup
+    config = load_config()
+    run_setup(kernel_path=config.kernel.mathkernel or None)
+
+
+def _cmd_caddyfile() -> None:
+    config = load_config()
+    if not config.tls.domain:
+        print("Error: tls.domain must be set in config to generate a Caddyfile")
+        sys.exit(1)
+    from mma_mcp.caddyfile import generate_caddyfile
+    path = generate_caddyfile(config)
+    print(f"Generated Caddyfile: {path}")
+    if config.tls.dns_provider:
+        from mma_mcp.config import DNS_PROVIDERS
+        info = DNS_PROVIDERS.get(config.tls.dns_provider, {})
+        plugin = info.get("caddy_plugin", "")
+        env_vars = info.get("env_vars", [])
+        print(f"\nDNS provider: {config.tls.dns_provider}")
+        print(f"Build Caddy:  xcaddy build --with {plugin}")
+        print(f"Required env: {', '.join(env_vars)}")
     else:
-        async def run_stdio() -> None:
-            async with stdio_transport() as (read_stream, write_stream):
-                await mcp._mcp_server.run(  # type: ignore[attr-defined]
-                    read_stream,
-                    write_stream,
-                    mcp._mcp_server.create_initialization_options(),  # type: ignore[attr-defined]
-                )
-
-        anyio.run(run_stdio)
+        print("\nUsing HTTP-01 challenge (port 80 must be open)")
 
 
-# ---------------------------------------------------------------------------
-# add-user CLI helper
-# ---------------------------------------------------------------------------
-
-def _cmd_add_user() -> None:
-    """Generate a TOML snippet for adding a user."""
-    import argparse
+def _cmd_hash_password() -> None:
     import getpass
     from mma_mcp.passwords import hash_password
+    pwd = getpass.getpass("Password: ")
+    pwd2 = getpass.getpass("Confirm:  ")
+    if pwd != pwd2:
+        print("Error: passwords do not match", file=sys.stderr)
+        sys.exit(1)
+    print(hash_password(pwd))
 
-    parser = argparse.ArgumentParser(
-        prog="mma-mcp add-user",
-        description="Generate a TOML user entry (paste into mma_mcp.toml)",
-    )
-    parser.add_argument("username", nargs="?", help="Username")
-    parser.add_argument("--role", required=True, help="Role name")
-    # Consume the "add-user" token from argv
-    args = parser.parse_args(sys.argv[2:])
+
+def _cmd_add_user(args) -> None:  # noqa: ANN001
+    """Generate a TOML snippet for adding a user."""
+    import getpass
+    from mma_mcp.passwords import hash_password
 
     username = args.username
     if not username:

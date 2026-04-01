@@ -87,6 +87,11 @@
 - [x] `mma-mcp hash-password` 命令
 - [x] `mma-mcp add-user` 命令（生成 TOML 片段）
 
+### 2.7 代码质量
+
+- [x] CLI 统一为 argparse subcommand（serve/init/setup/caddyfile/hash-password/add-user）
+- [x] `App` 类封装服务器状态，替代全局单例，利于测试和多实例
+
 ## Phase 3: 扩展工具集
 
 > 架构就绪后，新增工具只需：写工具函数 + 加入注册表 + 用户在配置中 enable。
