@@ -55,7 +55,9 @@ class App:
     def kernel(self) -> KernelSession:
         if self._kernel is None:
             kernel_path = find_kernel(self.config.kernel.mathkernel or None)
-            self._kernel = KernelSession(kernel=kernel_path)
+            self._kernel = KernelSession(
+                kernel=kernel_path, graphics=self.config.kernel.graphics,
+            )
         return self._kernel
 
     @property
@@ -322,6 +324,43 @@ def _cmd_serve(args) -> None:  # noqa: ANN001
     )
 
 
+def _update_graphics_config(mode: str) -> None:
+    """Update kernel.graphics in the config file, if one exists."""
+    import re
+
+    for name in ("mma_mcp.toml", "pyproject.toml"):
+        path = Path(name)
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        # Try to replace existing graphics = "..." line
+        new_text, count = re.subn(
+            r'^(\s*graphics\s*=\s*)(".*?"|\'.*?\')\s*$',
+            rf'\1"{mode}"',
+            text,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        if count > 0:
+            path.write_text(new_text, encoding="utf-8")
+            print(f"已更新 {path}: kernel.graphics = \"{mode}\"")
+            return
+        # graphics line not found — try inserting after [kernel] section
+        # Look for the default_format line and add after it
+        new_text, count = re.subn(
+            r'^(\s*default_format\s*=\s*".*?")\s*$',
+            rf'\1\ngraphics = "{mode}"',
+            text,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        if count > 0:
+            path.write_text(new_text, encoding="utf-8")
+            print(f"已添加 {path}: kernel.graphics = \"{mode}\"")
+            return
+    print(f"提示: 未找到配置文件。可手动设置 kernel.graphics = \"{mode}\"")
+
+
 def _cmd_init() -> None:
     path = generate_default_config()
     print(f"Generated default config: {path}")
@@ -329,9 +368,22 @@ def _cmd_init() -> None:
 
 def _cmd_setup() -> None:
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
-    from mma_mcp.setup_groups import run_setup
     config = load_config()
-    run_setup(kernel_path=config.kernel.mathkernel or None)
+    kernel_path = config.kernel.mathkernel or None
+
+    # 1. Regenerate security group JSON files
+    from mma_mcp.setup_groups import run_setup
+    run_setup(kernel_path=kernel_path)
+
+    # 2. Graphics capability check
+    print("\n--- 图形渲染检测 ---")
+    from mma_mcp.kernel import check_graphics
+    result = check_graphics(kernel_path=kernel_path)
+    print(result.message)
+    print(f"推荐配置: kernel.graphics = \"{result.mode}\"")
+
+    # Try to update config file
+    _update_graphics_config(result.mode)
 
 
 def _cmd_caddyfile() -> None:

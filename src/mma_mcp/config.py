@@ -30,6 +30,7 @@ class KernelConfig:
     max_result_size: int = 65536  # max result string length (chars); 0 = no limit
     session_isolation: bool = True  # isolate user variables via WL context namespacing
     default_format: str = "TeXForm"
+    graphics: str = "auto"         # "auto" (detect at startup), "xvfb", "none"
 
 
 @dataclass
@@ -189,6 +190,7 @@ def _build_kernel_config(raw: dict[str, Any]) -> KernelConfig:
         max_result_size=sec.get("max_result_size", defaults.max_result_size),
         session_isolation=sec.get("session_isolation", defaults.session_isolation),
         default_format=sec.get("default_format", defaults.default_format),
+        graphics=sec.get("graphics", defaults.graphics),
     )
 
 
@@ -286,6 +288,12 @@ def _validate(config: AppConfig) -> None:
         errors.append(
             f"kernel.default_format must be one of {sorted(valid_formats)}, "
             f"got {config.kernel.default_format!r}"
+        )
+    valid_graphics = {"auto", "xvfb", "none"}
+    if config.kernel.graphics not in valid_graphics:
+        errors.append(
+            f"kernel.graphics must be one of {sorted(valid_graphics)}, "
+            f"got {config.kernel.graphics!r}"
         )
     if config.kernel.mathkernel and not Path(config.kernel.mathkernel).exists():
         errors.append(f"kernel.mathkernel path does not exist: {config.kernel.mathkernel}")
@@ -428,6 +436,13 @@ session_isolation = true
 
 # Default output format: TeXForm, OutputForm, InputForm, etc.
 default_format = "TeXForm"
+
+# Graphics rendering backend:
+#   "auto"  — detect at startup (try Xvfb, fall back to "none")
+#   "xvfb"  — require Xvfb (fail fast if unavailable)
+#   "none"  — disable graphics (evaluate_image/plot tools return error)
+# Run `mma-mcp setup` to auto-detect and write the correct value.
+graphics = "auto"
 
 # ─── Server Transport ────────────────────────────────────────────────────────
 
