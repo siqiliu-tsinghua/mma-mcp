@@ -6,3 +6,5 @@ __pycache__/
 dist/
 build/
 .claude/
+.codex/
+ASSESSMENT_REPORT.md

@@ -133,7 +133,7 @@
 ### 客户端验证
 
 - [ ] Claude Desktop (stdio) 连通测试
-- [ ] Claude Code (stdio) 连通测试
+- [x] Claude Code (stdio) 连通测试
 - [ ] Claude Web / ChatGPT (HTTP + Caddy) 远程连通测试
 
 ### 跨平台图形渲染验证
@@ -149,3 +149,30 @@
 - `ldd` / `ldconfig` 检测路径在不同发行版中的兼容性
 - macOS 下 WolframNB 是否仍需 `QT_QPA_PLATFORM=offscreen`
 - `check_graphics()` 中的依赖检测逻辑需适配非 Debian 系包管理器
+
+## Phase 6: 安全与正确性修复
+
+> 基于 2026-04-02 外部评估报告，按优先级排列。
+
+### P0：安全关键
+
+- [ ] **白名单模式被静默放宽**：`_refine_whitelist()` 在拿到内核 `System\`` 符号后，把"所有非危险符号"无条件加入白名单，导致 `allow_groups=["arithmetic"]` 时 `Plot` 等仍可通过。需修正 `registry.py:127-130` 的构建逻辑，只对缺失组做精确回退。补回归测试：白名单内核启动前后行为一致。
+- [ ] **OAuth 客户端注册未校验**：`_authorize_submit()` 未校验 `client_id` 是否已注册、`redirect_uri` 是否匹配注册记录。公网部署时授权码可被发到任意地址。需在 `oauth.py:191-232` 加强制校验，并强制 PKCE。补真实 HTTP 流程测试。
+- [ ] **`tools="*"` 只解析到部分工具**：`_build_role_runtimes()` 执行时只导入了 `evaluate` 和 `math` 模块，admin 的 `tools="*"` 实际只有 6 个工具（缺 `plot`/`data_query`/`query`）。需在构建前统一导入全部工具模块。补测试。
+
+### P1：功能正确性
+
+- [ ] **会话隔离不一致**：`solve()` 传了 `context=ctx.session_context`，但 `simplify()`/`integrate()`/`differentiate()` 未传。多用户下变量可能互串。统一所有工具的 context 传递。
+- [ ] **Xvfb 启动假阳性**：`_start_xvfb()` 等待 lock 文件循环结束后，即使 lock 未出现也返回成功。需确认 lock 存在才返回，并检查进程是否已退出。
+- [ ] **WLD enrichment 全损**：`_query_functionality_areas()` 任一 batch 异常则 `return {}`，已完成进度全丢。改为 batch 级 try/except，保留已完成结果。
+- [ ] **图形检测 Debian 耦合**：`check_graphics()` 应先检查现有 DISPLAY，再尝试 Xvfb；返回真实模式 `display`/`xvfb`/`none`。包名提示标注为 Debian/Ubuntu 专用。
+
+### P2：契约与文档
+
+- [ ] `query` 工具的 `format` 参数无实际效果——要么实现分支，要么移除参数
+- [ ] `data_query` 中 `WeatherData`/`FinancialData` 可能绕过安全分组——确认联网语义后归入危险组或拆分 `live_data` 组
+- [ ] `kernel.wolframscript` 配置项未接入 `mma-mcp setup` 流程——删除文档说明或实际接入
+
+### 待排查
+
+- [ ] **`mma-mcp setup` 连接内核后卡住**：运行 `mma-mcp setup` 时进程挂起，`top` 中无 mathkernel 进程。`scripts/test_wld.py` 直连内核则一切正常（WLD 查询 0.6–2.4s/batch）。已将 arithmetic 分组的 Attributes 查询改为纯 WL `Module[...]`，但尚未验证修复是否有效。根因待进一步排查。
