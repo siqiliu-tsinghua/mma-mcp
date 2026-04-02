@@ -110,7 +110,11 @@ class App:
                 expr_filter = registry.build_filter(config.security)
 
             runtimes[role_name] = RoleRuntime(
-                allowed_tools=allowed, expr_filter=expr_filter,
+                allowed_tools=allowed,
+                expr_filter=expr_filter,
+                timeout=role_conf.timeout,
+                hard_timeout=role_conf.hard_timeout,
+                max_result_size=role_conf.max_result_size,
             )
             logger.info(
                 "Role %s: %d tools, security=%s",

@@ -135,3 +135,17 @@
 - [ ] Claude Desktop (stdio) 连通测试
 - [ ] Claude Code (stdio) 连通测试
 - [ ] Claude Web / ChatGPT (HTTP + Caddy) 远程连通测试
+
+### 跨平台图形渲染验证
+
+目前图形相关的测试、系统依赖诊断和 `check_graphics()` 逻辑均在 **Debian (Linux x86-64)** 环境下完成。以下平台尚未验证：
+
+- [ ] Windows（原生 / WSL2）——WSL 下之前 Xvfb 方式失败，可能是缺系统依赖，待复测
+- [ ] macOS——不需要 Xvfb（有原生 display），但 Qt 插件和依赖路径可能不同
+- [ ] 其它 Linux 发行版（Ubuntu、RHEL/CentOS、Arch 等）——包名和库路径可能不同
+
+需要关注的点：
+- 系统依赖包名差异（如 `libfontconfig1` 在 RHEL 中是 `fontconfig`）
+- `ldd` / `ldconfig` 检测路径在不同发行版中的兼容性
+- macOS 下 WolframNB 是否仍需 `QT_QPA_PLATFORM=offscreen`
+- `check_graphics()` 中的依赖检测逻辑需适配非 Debian 系包管理器

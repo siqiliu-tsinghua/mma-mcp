@@ -120,6 +120,10 @@ class RoleConfig:
     allow_groups: list[str] = field(default_factory=list)
     extra_blocked: list[str] = field(default_factory=list)
     extra_allowed: list[str] = field(default_factory=list)
+    # Per-role resource limits (0 = inherit global [kernel] value)
+    timeout: int = 0
+    hard_timeout: int = 0
+    max_result_size: int = 0
 
 
 @dataclass
@@ -252,6 +256,9 @@ def _build_auth_config(raw: dict[str, Any]) -> AuthConfig:
             allow_groups=rdata.get("allow_groups", []),
             extra_blocked=rdata.get("extra_blocked", []),
             extra_allowed=rdata.get("extra_allowed", []),
+            timeout=rdata.get("timeout", 0),
+            hard_timeout=rdata.get("hard_timeout", 0),
+            max_result_size=rdata.get("max_result_size", 0),
         )
 
     # Parse users
@@ -367,6 +374,12 @@ def _validate(config: AppConfig) -> None:
                     f"{sorted(valid_sec_modes - {''})!r} or omitted, "
                     f"got {rconf.security!r}"
                 )
+            if rconf.timeout < 0:
+                errors.append(f"auth.roles.{rname}: timeout must be >= 0")
+            if rconf.hard_timeout < 0:
+                errors.append(f"auth.roles.{rname}: hard_timeout must be >= 0")
+            if rconf.max_result_size < 0:
+                errors.append(f"auth.roles.{rname}: max_result_size must be >= 0")
 
     if errors:
         msg = "Configuration errors:\n" + "\n".join(f"  - {e}" for e in errors)
@@ -559,6 +572,10 @@ enabled = [
 # tools = ["evaluate", "evaluate_image", "solve", "integrate"]
 # security = "whitelist"
 # allow_groups = ["arithmetic", "algebra", "calculus", "statistics", "plotting_2d"]
+# # Per-role resource limits (0 or omitted = inherit global [kernel] values)
+# timeout = 15
+# hard_timeout = 30
+# max_result_size = 16384
 #
 # [auth.users.alice]
 # role = "admin"

@@ -353,3 +353,72 @@ class TestSessionIsolation:
         assert '$Context = "MCP$alice`"' in wrapped
         assert '$ContextPath' in wrapped
         assert "x = 5" in wrapped
+
+
+# ===================================================================
+# Per-role resource limits
+# ===================================================================
+
+class TestRoleResourceLimits:
+
+    def _make_ctx_with_limits(self) -> ToolContext:
+        """Build a ctx where admin has custom limits, reader inherits global."""
+        admin_runtime = RoleRuntime(
+            allowed_tools=frozenset({"evaluate"}),
+            expr_filter=None,
+            timeout=10,
+            hard_timeout=20,
+            max_result_size=1024,
+        )
+        reader_runtime = RoleRuntime(
+            allowed_tools=frozenset({"evaluate"}),
+            expr_filter=None,
+            # all 0 → inherit global
+        )
+        return _make_ctx(role_runtimes={
+            "admin": admin_runtime,
+            "reader": reader_runtime,
+        })
+
+    def test_role_overrides_timeout(self):
+        """Role with timeout > 0 overrides global."""
+        ctx = self._make_ctx_with_limits()
+        from mma_mcp.auth import UserIdentity, current_user
+        tok = current_user.set(UserIdentity(username="alice", role="admin"))
+        try:
+            assert ctx.timeout == 10
+            assert ctx.hard_timeout == 20
+            assert ctx.max_result_size == 1024
+        finally:
+            current_user.reset(tok)
+
+    def test_role_inherits_global_when_zero(self):
+        """Role with limit=0 falls back to global config."""
+        ctx = self._make_ctx_with_limits()
+        from mma_mcp.auth import UserIdentity, current_user
+        tok = current_user.set(UserIdentity(username="bob", role="reader"))
+        try:
+            assert ctx.timeout == ctx.config.kernel.timeout
+            assert ctx.hard_timeout == ctx.config.kernel.hard_timeout
+            assert ctx.max_result_size == ctx.config.kernel.max_result_size
+        finally:
+            current_user.reset(tok)
+
+    def test_anonymous_uses_global(self):
+        """Anonymous user always gets global limits."""
+        ctx = self._make_ctx_with_limits()
+        # No current_user set → anonymous
+        assert ctx.timeout == ctx.config.kernel.timeout
+
+    def test_truncate_uses_role_limit(self):
+        """truncate() respects role-specific max_result_size."""
+        ctx = self._make_ctx_with_limits()
+        from mma_mcp.auth import UserIdentity, current_user
+        tok = current_user.set(UserIdentity(username="alice", role="admin"))
+        try:
+            big = "x" * 2000
+            result = ctx.truncate(big)
+            assert len(result) < 2000
+            assert "[Truncated" in result
+        finally:
+            current_user.reset(tok)

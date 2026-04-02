@@ -38,6 +38,10 @@ class RoleRuntime:
     """Pre-computed runtime data for one role."""
     allowed_tools: frozenset[str]
     expr_filter: ExpressionFilter | None  # None = skip filtering ("none")
+    # Per-role resource limits (0 = inherit global)
+    timeout: int = 0
+    hard_timeout: int = 0
+    max_result_size: int = 0
 
 
 # Contextvar: per-request security filter override (set by _safe_wrapper)
@@ -124,16 +128,35 @@ class ToolContext:
         for expr in expressions:
             filt.check(expr)
 
+    def _current_role_runtime(self) -> RoleRuntime | None:
+        """Return the RoleRuntime for the current user, or None."""
+        if not self.role_runtimes:
+            return None
+        from mma_mcp.auth import current_user
+        user = current_user.get()
+        if not user.role:
+            return None
+        return self.role_runtimes.get(user.role)
+
     @property
     def timeout(self) -> int:
+        rt = self._current_role_runtime()
+        if rt and rt.timeout > 0:
+            return rt.timeout
         return self.config.kernel.timeout
 
     @property
     def hard_timeout(self) -> int:
+        rt = self._current_role_runtime()
+        if rt and rt.hard_timeout > 0:
+            return rt.hard_timeout
         return self.config.kernel.hard_timeout
 
     @property
     def max_result_size(self) -> int:
+        rt = self._current_role_runtime()
+        if rt and rt.max_result_size > 0:
+            return rt.max_result_size
         return self.config.kernel.max_result_size
 
     @property
