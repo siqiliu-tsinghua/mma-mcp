@@ -56,7 +56,10 @@ class App:
         if self._kernel is None:
             kernel_path = find_kernel(self.config.kernel.mathkernel or None)
             self._kernel = KernelSession(
-                kernel=kernel_path, graphics=self.config.kernel.graphics,
+                kernel=kernel_path,
+                graphics=self.config.kernel.graphics,
+                health_check_interval=self.config.kernel.health_check_interval,
+                idle_timeout=self.config.kernel.idle_timeout,
             )
         return self._kernel
 
@@ -315,11 +318,8 @@ def main() -> None:
 
 def _cmd_serve(args) -> None:  # noqa: ANN001
     """Start the MCP server."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        stream=sys.stderr,
-    )
+    from mma_mcp.logging_config import setup_logging
+    setup_logging(level=logging.INFO)
     app = App()
     app.run(
         transport=args.transport or "",

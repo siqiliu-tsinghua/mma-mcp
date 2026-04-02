@@ -13,6 +13,8 @@ import os
 import shutil
 import subprocess
 import tempfile
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -174,16 +176,27 @@ class KernelSession:
     """Wraps a single WolframLanguageSession with auto-restart on crash."""
 
     def __init__(
-        self, kernel: str | None = None, graphics: str = "auto",
+        self,
+        kernel: str | None = None,
+        graphics: str = "auto",
+        health_check_interval: int = 0,
+        idle_timeout: int = 0,
     ) -> None:
         """
         Args:
             kernel:   Path to WolframKernel binary. None = auto-detect.
             graphics: Graphics mode — ``"auto"``, ``"xvfb"``, or ``"none"``.
+            health_check_interval: Seconds between health pings. 0 = disabled.
+            idle_timeout: Stop kernel after N seconds idle. 0 = never.
         """
         self._kernel = kernel or find_kernel()
         self._graphics = graphics
+        self._health_check_interval = health_check_interval
+        self._idle_timeout = idle_timeout
         self._session: WolframLanguageSession | None = None
+        self._last_activity: float = 0.0
+        self._health_thread: threading.Thread | None = None
+        self._health_stop = threading.Event()
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -196,9 +209,12 @@ class KernelSession:
         logger.info("Starting Wolfram kernel session (kernel=%s)", self._kernel or "auto")
         self._session = self._make_session()
         self._session.start()
+        self._last_activity = time.monotonic()
         logger.info("Wolfram kernel ready")
+        self._start_health_thread()
 
     def stop(self) -> None:
+        self._stop_health_thread()
         if self._session is None:
             return
         logger.info("Stopping Wolfram kernel session")
@@ -210,13 +226,81 @@ class KernelSession:
 
     def restart(self) -> None:
         logger.warning("Restarting Wolfram kernel session")
-        self.stop()
+        self._stop_health_thread()
+        if self._session is not None:
+            try:
+                self._session.stop()
+            except Exception:
+                pass
+            self._session = None
         self.start()
 
     def _make_session(self) -> WolframLanguageSession:
         if self._kernel:
             return WolframLanguageSession(self._kernel)
         return WolframLanguageSession()
+
+    # ------------------------------------------------------------------
+    # Health check
+    # ------------------------------------------------------------------
+
+    def _start_health_thread(self) -> None:
+        """Start background health-check thread if configured."""
+        if self._health_check_interval <= 0 and self._idle_timeout <= 0:
+            return
+        self._health_stop.clear()
+        self._health_thread = threading.Thread(
+            target=self._health_loop, daemon=True, name="kernel-health",
+        )
+        self._health_thread.start()
+        logger.info(
+            "Health check started (ping=%ds, idle=%ds)",
+            self._health_check_interval, self._idle_timeout,
+        )
+
+    def _stop_health_thread(self) -> None:
+        if self._health_thread is not None:
+            self._health_stop.set()
+            self._health_thread = None
+
+    def _health_loop(self) -> None:
+        """Periodically ping the kernel and check idle timeout."""
+        interval = self._health_check_interval if self._health_check_interval > 0 else 30
+        while not self._health_stop.wait(timeout=interval):
+            if self._session is None:
+                continue
+
+            # Idle timeout check
+            if self._idle_timeout > 0:
+                idle_secs = time.monotonic() - self._last_activity
+                if idle_secs >= self._idle_timeout:
+                    logger.info(
+                        "Kernel idle for %.0fs (limit %ds) — stopping",
+                        idle_secs, self._idle_timeout,
+                    )
+                    self._stop_session_only()
+                    continue
+
+            # Health ping
+            if self._health_check_interval > 0:
+                try:
+                    result = self._session.evaluate(wlexpr("1+1"))
+                    if result != 2:
+                        logger.warning("Health check got unexpected result: %r — restarting", result)
+                        self.restart()
+                except Exception:
+                    logger.warning("Health check failed — restarting kernel", exc_info=True)
+                    self.restart()
+
+    def _stop_session_only(self) -> None:
+        """Stop the kernel session without stopping the health thread."""
+        if self._session is None:
+            return
+        try:
+            self._session.stop()
+        except Exception:
+            pass
+        self._session = None
 
     # ------------------------------------------------------------------
     # Evaluation
@@ -235,8 +319,11 @@ class KernelSession:
                           ``KernelTimeout`` is raised. 0 = no limit.
         """
         self._ensure_started()
+        self._last_activity = time.monotonic()
         try:
-            return self._evaluate_with_hard_timeout(expr, hard_timeout)
+            result = self._evaluate_with_hard_timeout(expr, hard_timeout)
+            self._last_activity = time.monotonic()
+            return result
         except WolframKernelException:
             if retry:
                 logger.warning("Kernel exception — restarting and retrying once")

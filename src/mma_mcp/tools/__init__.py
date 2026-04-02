@@ -235,11 +235,18 @@ def _safe_wrapper(fn: Callable, ctx: ToolContext, tool_name: str) -> Callable:
 
     @functools.wraps(fn)
     def wrapper(**kwargs: Any) -> Any:
+        # Assign a request ID for log correlation
+        from mma_mcp.logging_config import new_request_id, request_id
+        rid = new_request_id()
+        rid_token = request_id.set(rid)
+        logger.info("Tool %s called (params: %s)", tool_name, list(kwargs.keys()))
         try:
             # Role-based access control
             filt_token = _apply_role_policy(ctx, tool_name)
             try:
-                return fn(ctx, **kwargs)
+                result = fn(ctx, **kwargs)
+                logger.info("Tool %s completed", tool_name)
+                return result
             finally:
                 if filt_token is not None:
                     _active_filter.reset(filt_token)
@@ -257,6 +264,8 @@ def _safe_wrapper(fn: Callable, ctx: ToolContext, tool_name: str) -> Callable:
         except Exception as e:
             logger.exception("Unexpected error in tool %s", fn.__name__)
             return f"[Error] {type(e).__name__}: {e}"
+        finally:
+            request_id.reset(rid_token)
 
     # Strip the 'ctx' parameter from the signature so FastMCP doesn't see it.
     # Also remove the return annotation — FastMCP handles Image returns

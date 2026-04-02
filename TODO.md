@@ -108,10 +108,10 @@
 ## Phase 4: 健壮性
 
 - [x] 会话隔离：WL context 命名空间隔离，每用户独立变量作用域
-- [ ] 内核健康检查（定期 ping / 空闲超时回收）
+- [x] 内核健康检查（定期 ping、空闲超时回收，`health_check_interval` / `idle_timeout` 配置项）
 - [x] 结果大小限制（`max_result_size` 配置项，超限截断）
 - [x] Python 侧硬超时（`hard_timeout` 配置项，内核卡死时强制重启）
-- [ ] 日志完善（结构化日志、请求追踪）
+- [x] 日志完善（结构化日志 + 每请求 request_id 追踪，JSON 格式可选）
 
 ## Phase 5: 部署与集成测试
 
@@ -121,7 +121,7 @@
 - [x] 工具层 + RBAC 单元测试（mock 内核）— 18 tests
 - [x] 认证 + OAuth + 密码哈希单元测试 — 20 tests
 - [x] 配置加载 + 校验单元测试 — 31 tests
-- [ ] 集成测试：真实内核 + MCP 协议端到端
+- [x] 集成测试：真实内核 + MCP 协议端到端 — 17 tests via FastMCP.call_tool
 
 ### 部署
 
