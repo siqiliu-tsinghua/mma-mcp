@@ -174,7 +174,7 @@ class TestCapabilityRegistry:
 
     def test_groups_loaded(self, registry):
         groups = registry.available_groups()
-        assert "arithmetic" in groups
+        assert "math_core" in groups
         assert "system_exec" in groups
 
     def test_build_blacklist_filter(self, registry):
@@ -193,11 +193,11 @@ class TestCapabilityRegistry:
     def test_build_whitelist_filter(self, registry):
         config = SecurityConfig(
             mode="whitelist",
-            allow_groups=["arithmetic"],
+            allow_groups=["math_core"],
         )
         filt = registry.build_filter(config)
         assert filt.mode == "whitelist"
-        # Plus is in arithmetic
+        # Plus is in math_core
         filt.check("1 + 2")
 
     def test_extra_blocked(self, registry):
@@ -227,8 +227,8 @@ class TestCapabilityRegistry:
         filt.check("Plot[Sin[x], {x, 0, 2 Pi}]")
 
     def test_whitelist_not_widened_by_system_symbols(self, registry):
-        """After initialize_system_symbols, whitelist=["arithmetic"] must still
-        reject symbols from other groups (e.g. Plot from plotting_2d).
+        """After initialize_system_symbols, whitelist=["math_core"] must still
+        reject symbols from other groups (e.g. Plot from visualization).
 
         Regression test for: whitelist was unconditionally widened to
         all_system_symbols - dangerous, making allow_groups meaningless.
@@ -237,24 +237,24 @@ class TestCapabilityRegistry:
         fake_system = {"Sin", "Cos", "Plus", "Plot", "Solve", "Run", "Times"}
         registry.initialize_system_symbols(fake_system)
 
-        config = SecurityConfig(mode="whitelist", allow_groups=["arithmetic"])
+        config = SecurityConfig(mode="whitelist", allow_groups=["math_core"])
         filt = registry.build_filter(config)
 
-        # Sin[Pi] should pass (both in arithmetic group)
+        # Sin[Pi] should pass (both in math_core group)
         filt.check("Sin[Pi]")
 
-        # Plot is NOT in arithmetic — must be rejected
+        # Plot is NOT in math_core — must be rejected
         with pytest.raises(SecurityError):
             filt.check("Plot[Sin[x], {x, 0, 1}]")
 
-        # Solve is NOT in arithmetic — must be rejected
+        # Solve is NOT in math_core — must be rejected
         with pytest.raises(SecurityError):
             filt.check("Solve[x^2 == 1, x]")
 
     def test_whitelist_before_and_after_system_symbols_consistent(self, registry):
         """Whitelist filter behavior must be the same before and after
         initialize_system_symbols when all configured groups exist locally."""
-        config = SecurityConfig(mode="whitelist", allow_groups=["arithmetic"])
+        config = SecurityConfig(mode="whitelist", allow_groups=["math_core"])
 
         filt_before = registry.build_filter(config)
 
@@ -262,7 +262,7 @@ class TestCapabilityRegistry:
         registry.initialize_system_symbols(fake_system)
         filt_after = registry.build_filter(config)
 
-        # Both should reject Plot (not in arithmetic)
+        # Both should reject Plot (not in math_core)
         with pytest.raises(SecurityError):
             filt_before.check("Plot[Sin[Pi], {x, 0, 1}]")
         with pytest.raises(SecurityError):

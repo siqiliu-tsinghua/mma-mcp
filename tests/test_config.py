@@ -100,10 +100,10 @@ class TestConfigBuilders:
         assert t.dns_provider == "cloudflare"
 
     def test_build_security_config(self):
-        raw = {"security": {"mode": "whitelist", "allow_groups": ["arithmetic"]}}
+        raw = {"security": {"mode": "whitelist", "allow_groups": ["math_core"]}}
         s = _build_security_config(raw)
         assert s.mode == "whitelist"
-        assert s.allow_groups == ["arithmetic"]
+        assert s.allow_groups == ["math_core"]
 
     def test_build_tools_config(self):
         raw = {"tools": {"enabled": ["evaluate"]}}

@@ -108,7 +108,7 @@ class TestSecurityPipeline:
     def test_whitelist_allows_configured_groups(self, kernel, registry):
         config = SecurityConfig(
             mode="whitelist",
-            allow_groups=["arithmetic", "algebra", "calculus"],
+            allow_groups=["math_core", "algebra", "calculus"],
             extra_allowed=["x", "y"],  # user variables need explicit allow in whitelist
         )
         filt = registry.build_filter(config)
@@ -119,7 +119,7 @@ class TestSecurityPipeline:
     def test_whitelist_blocks_plotting(self, kernel, registry):
         config = SecurityConfig(
             mode="whitelist",
-            allow_groups=["arithmetic"],  # no plotting
+            allow_groups=["math_core"],  # no plotting
         )
         filt = registry.build_filter(config)
         with pytest.raises(SecurityError):

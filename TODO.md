@@ -177,4 +177,4 @@
 ### 待排查
 
 - [x] **`mma-mcp setup` 连接内核后卡住**：根因是 `Attributes[Evaluate@ToExpression[#]]` 对 `$Cloud*` 等符号触发网络连接导致内核死锁。修复：改用 `Attributes[#]` 直接传字符串，不需要 `ToExpression`。全量 setup 约 46 秒完成。
-- [ ] **危险组分类方法需重构**：当前靠通配符 + 手工枚举，遗漏不可避免。应先跑通 WolframLanguageData 自动分类（修复 setup 卡住问题后），用 FunctionalityAreas 覆盖大部分符号，手工列表仅作补充。
+- [x] **危险组分类方法重构完成**：已从通配符+手工枚举改为 WolframLanguageData FunctionalityAreas 驱动分类。208 个 FunctionalityAreas 映射到 22 个安全组 + 6 个危险组，覆盖 6034/7805 符号（77%）。未分类符号主要是 Box/Frontend 内部符号，白名单模式下默认拒绝。危险种子列表作为安全兜底始终包含。

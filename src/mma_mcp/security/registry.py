@@ -34,20 +34,28 @@ _DEFAULT_BLACKLIST_GROUPS = [
 
 # Default whitelist-mode groups — allowed out of the box
 _DEFAULT_WHITELIST_GROUPS = [
-    "arithmetic",
+    "math_core",
     "algebra",
     "calculus",
     "linear_algebra",
     "statistics",
     "number_theory",
-    "special_functions",
     "combinatorics",
-    "list_ops",
-    "string_ops",
+    "data_structures",
     "programming",
-    "plotting_2d",
-    "plotting_3d",
-    "graphics",
+    "visualization",
+    "graph_theory",
+    "geometry",
+    "optimization",
+    "signal_processing",
+    "image",
+    "machine_learning",
+    "chemistry_biology",
+    "quantitative",
+    "compile",
+    "crypto",
+    "fractal",
+    "interpolation",
 ]
 
 # All dangerous group names (used to subtract from whitelist)

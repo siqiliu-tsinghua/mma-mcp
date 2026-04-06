@@ -28,28 +28,11 @@ mma-mcp/
 │       │   ├── __init__.py
 │       │   ├── filter.py          # ExpressionFilter: AST parsing + symbol checking
 │       │   ├── registry.py        # CapabilityRegistry: load & merge group definitions
-│       │   └── groups/            # Pre-generated JSON symbol lists per group
-│       │       ├── manifest.json  # Group metadata (description, danger level)
-│       │       ├── arithmetic.json
-│       │       ├── algebra.json
-│       │       ├── calculus.json
-│       │       ├── linear_algebra.json
-│       │       ├── statistics.json
-│       │       ├── number_theory.json
-│       │       ├── special_functions.json
-│       │       ├── combinatorics.json
-│       │       ├── list_ops.json
-│       │       ├── string_ops.json
-│       │       ├── programming.json
-│       │       ├── plotting_2d.json
-│       │       ├── plotting_3d.json
-│       │       ├── graphics.json
-│       │       ├── file_read.json       # dangerous
-│       │       ├── file_write.json      # dangerous
-│       │       ├── networking.json      # dangerous
-│       │       ├── system_exec.json     # dangerous
-│       │       ├── dynamic_eval.json    # dangerous
-│       │       └── external_services.json  # dangerous
+│       │   └── groups/            # WLD-derived JSON symbol lists per group
+│       │       ├── manifest.json  # Group metadata (28 groups: 22 safe + 6 dangerous)
+│       │       ├── math_core.json, algebra.json, calculus.json, ...  # 22 safe groups
+│       │       ├── system_exec.json, file_read.json, ...             # 6 dangerous groups
+│       │       └── (regenerate via: mma-mcp setup)
 │       ├── tools/
 │       │   ├── evaluate.py        # evaluate / evaluate_image
 │       │   ├── math.py            # solve / simplify / integrate / differentiate
@@ -78,21 +61,20 @@ mma-mcp/
 ### Core principle
 Expression filtering happens **before** the kernel sees any code. The Python layer parses the WL expression into an AST, extracts all symbol references, and checks against the active policy. The kernel only receives clean, policy-compliant expressions.
 
-### Two-layer symbol resolution
-1. **`DANGEROUS_SYMBOLS`** — a single authoritative set maintained in `filter.py` (~few hundred symbols covering system_exec, file I/O, networking, dynamic eval)
-2. **All built-ins** — queried from kernel once at startup via `Names["System`*"]`
+### Symbol classification
+Symbols are classified using **WolframLanguageData FunctionalityAreas** as the primary source. Each of the 208 distinct FunctionalityAreas maps to a security group. Hard-coded dangerous seeds provide a safety net for critical symbols regardless of WLD data.
 
 Derived policies:
-- **Blacklist mode:** reject if `used_symbols ∩ DANGEROUS_SYMBOLS ≠ ∅`
-- **Whitelist mode:** reject if `used_symbols ⊄ (all_builtins − DANGEROUS_SYMBOLS)`
+- **Blacklist mode:** reject if `used_symbols ∩ dangerous_symbols ≠ ∅`
+- **Whitelist mode:** reject if `used_symbols ⊄ allowed_symbols`
 
 ### Capability groups
-Symbols are pre-grouped into named capability groups (stored as JSON files). Users configure security by enabling/disabling groups, not individual symbols.
+Symbols are pre-grouped into named capability groups (stored as JSON files). Users configure security by enabling/disabling groups, not individual symbols. Run `mma-mcp setup` to regenerate groups from the local kernel.
 
-**Safe groups** (enabled by default in whitelist mode):
-`arithmetic`, `algebra`, `calculus`, `linear_algebra`, `statistics`, `number_theory`, `special_functions`, `combinatorics`, `list_ops`, `string_ops`, `programming`, `plotting_2d`, `plotting_3d`, `graphics`
+**Safe groups** (22, enabled by default in whitelist mode):
+`math_core`, `algebra`, `calculus`, `linear_algebra`, `statistics`, `number_theory`, `combinatorics`, `data_structures`, `programming`, `visualization`, `graph_theory`, `geometry`, `optimization`, `signal_processing`, `image`, `machine_learning`, `chemistry_biology`, `quantitative`, `compile`, `crypto`, `fractal`, `interpolation`
 
-**Dangerous groups** (blocked by default):
+**Dangerous groups** (6, blocked by default):
 `file_read`, `file_write`, `networking`, `system_exec`, `dynamic_eval`, `external_services`
 
 ### Edge case: dynamic symbol construction
@@ -117,7 +99,7 @@ per request:
 ```toml
 [security]
 mode = "whitelist"
-allow_groups = ["arithmetic", "algebra", "calculus", "plotting_2d"]
+allow_groups = ["math_core", "algebra", "calculus", "visualization"]
 
 # or:
 mode = "blacklist"

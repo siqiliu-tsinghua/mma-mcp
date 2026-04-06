@@ -535,20 +535,28 @@ deny_groups = [
 # Whitelist mode: only these groups' symbols are allowed.
 # Used when mode = "whitelist". Example:
 # allow_groups = [
-#     "arithmetic",
+#     "math_core",
 #     "algebra",
 #     "calculus",
 #     "linear_algebra",
 #     "statistics",
 #     "number_theory",
-#     "special_functions",
 #     "combinatorics",
-#     "list_ops",
-#     "string_ops",
+#     "data_structures",
 #     "programming",
-#     "plotting_2d",
-#     "plotting_3d",
-#     "graphics",
+#     "visualization",
+#     "graph_theory",
+#     "geometry",
+#     "optimization",
+#     "signal_processing",
+#     "image",
+#     "machine_learning",
+#     "chemistry_biology",
+#     "quantitative",
+#     "compile",
+#     "crypto",
+#     "fractal",
+#     "interpolation",
 # ]
 
 # Fine-grained overrides (optional)
@@ -589,7 +597,7 @@ enabled = [
 # [auth.roles.analyst]
 # tools = ["evaluate", "evaluate_image", "solve", "integrate"]
 # security = "whitelist"
-# allow_groups = ["arithmetic", "algebra", "calculus", "statistics", "plotting_2d"]
+# allow_groups = ["math_core", "algebra", "calculus", "statistics", "visualization"]
 # # Per-role resource limits (0 or omitted = inherit global [kernel] values)
 # timeout = 15
 # hard_timeout = 30
