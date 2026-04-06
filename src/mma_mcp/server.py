@@ -331,6 +331,7 @@ def _cmd_serve(args) -> None:  # noqa: ANN001
 def _update_graphics_config(mode: str) -> None:
     """Update kernel.graphics in the config file, if one exists."""
     import re
+    from pathlib import Path
 
     for name in ("mma_mcp.toml", "pyproject.toml"):
         path = Path(name)

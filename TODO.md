@@ -176,5 +176,5 @@
 
 ### 待排查
 
-- [ ] **`mma-mcp setup` 连接内核后卡住**：运行 `mma-mcp setup` 时进程挂起，`top` 中无 mathkernel 进程。`scripts/test_wld.py` 直连内核则一切正常（WLD 查询 0.6–2.4s/batch）。已将 arithmetic 分组的 Attributes 查询改为纯 WL `Module[...]`，但尚未验证修复是否有效。根因待进一步排查。
+- [x] **`mma-mcp setup` 连接内核后卡住**：根因是 `Attributes[Evaluate@ToExpression[#]]` 对 `$Cloud*` 等符号触发网络连接导致内核死锁。修复：改用 `Attributes[#]` 直接传字符串，不需要 `ToExpression`。全量 setup 约 46 秒完成。
 - [ ] **危险组分类方法需重构**：当前靠通配符 + 手工枚举，遗漏不可避免。应先跑通 WolframLanguageData 自动分类（修复 setup 卡住问题后），用 FunctionalityAreas 覆盖大部分符号，手工列表仅作补充。

@@ -217,16 +217,13 @@ def run_setup(kernel_path: str | None = None) -> None:
         print("Generating safe groups…")
 
         # arithmetic: NumericFunction or Listable attributes
-        # Run entirely inside WL to avoid wolframclient hanging on the
-        # Select over 7000+ symbols.  Return only short names.
+        # Attributes[] accepts strings directly — do NOT use ToExpression,
+        # which triggers autoloading/network calls on $Cloud* symbols and
+        # causes the kernel to hang indefinitely.
         raw_arith = session.evaluate(wlexpr(
-            'Module[{syms = Names["System`*"], result},'
-            '  result = Select[syms,'
-            '    Quiet@Check['
-            '      MemberQ[Attributes[Evaluate@ToExpression[#]],'
-            '        NumericFunction|Listable], False]&];'
-            '  Map[Last@StringSplit[#, "`"]&, result]'
-            ']'
+            'Map[Last@StringSplit[#, "`"]&,'
+            '  Select[Names["System`*"],'
+            '    Quiet@Check[MemberQ[Attributes[#], NumericFunction|Listable], False]&]]'
         ))
         print(f"    (kernel found {len(raw_arith) if hasattr(raw_arith, '__len__') else 0}"
               f" NumericFunction|Listable symbols)")
