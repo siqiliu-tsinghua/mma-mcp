@@ -1,15 +1,16 @@
 {
   "mcpServers": {
     "mma-mcp": {
-      "command": "wsl",
+      "command": "uv",
       "args": [
-        "-e",
-        "uv",
         "--directory",
-        "/home/fft/src/mma-mcp",
+        "/home/fft/mma-mcp",
         "run",
         "mma-mcp"
-      ]
+      ],
+      "env": {
+        "DISPLAY": ":99"
+      }
     }
   }
 }

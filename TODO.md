@@ -133,6 +133,7 @@
 ### 客户端验证
 
 - [ ] Claude Desktop (stdio) 连通测试
+- [x] Claude Code (stdio) 连通测试——evaluate（文本）+ evaluate_image（PNG）+ 安全过滤均正常
 - [x] Claude Code (stdio) 连通测试
 - [ ] Claude Web / ChatGPT (HTTP + Caddy) 远程连通测试
 
