@@ -225,3 +225,45 @@ class TestCapabilityRegistry:
         filt.check("Integrate[Sin[x], {x, 0, Pi}]")
         filt.check("Solve[x^2 - 1 == 0, x]")
         filt.check("Plot[Sin[x], {x, 0, 2 Pi}]")
+
+    def test_whitelist_not_widened_by_system_symbols(self, registry):
+        """After initialize_system_symbols, whitelist=["arithmetic"] must still
+        reject symbols from other groups (e.g. Plot from plotting_2d).
+
+        Regression test for: whitelist was unconditionally widened to
+        all_system_symbols - dangerous, making allow_groups meaningless.
+        """
+        # Simulate kernel providing system symbols
+        fake_system = {"Sin", "Cos", "Plus", "Plot", "Solve", "Run", "Times"}
+        registry.initialize_system_symbols(fake_system)
+
+        config = SecurityConfig(mode="whitelist", allow_groups=["arithmetic"])
+        filt = registry.build_filter(config)
+
+        # Sin[Pi] should pass (both in arithmetic group)
+        filt.check("Sin[Pi]")
+
+        # Plot is NOT in arithmetic — must be rejected
+        with pytest.raises(SecurityError):
+            filt.check("Plot[Sin[x], {x, 0, 1}]")
+
+        # Solve is NOT in arithmetic — must be rejected
+        with pytest.raises(SecurityError):
+            filt.check("Solve[x^2 == 1, x]")
+
+    def test_whitelist_before_and_after_system_symbols_consistent(self, registry):
+        """Whitelist filter behavior must be the same before and after
+        initialize_system_symbols when all configured groups exist locally."""
+        config = SecurityConfig(mode="whitelist", allow_groups=["arithmetic"])
+
+        filt_before = registry.build_filter(config)
+
+        fake_system = {"Sin", "Cos", "Plot", "Run", "Integrate"}
+        registry.initialize_system_symbols(fake_system)
+        filt_after = registry.build_filter(config)
+
+        # Both should reject Plot (not in arithmetic)
+        with pytest.raises(SecurityError):
+            filt_before.check("Plot[Sin[Pi], {x, 0, 1}]")
+        with pytest.raises(SecurityError):
+            filt_after.check("Plot[Sin[Pi], {x, 0, 1}]")

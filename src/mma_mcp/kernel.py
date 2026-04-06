@@ -111,7 +111,7 @@ def _start_xvfb() -> str | None:
         logger.info("Xvfb already running on %s", display)
         return display
     try:
-        subprocess.Popen(
+        proc = subprocess.Popen(
             ["Xvfb", display, "-screen", "0", "1280x1024x24"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -119,7 +119,13 @@ def _start_xvfb() -> str | None:
         for _ in range(20):
             if lock.exists():
                 break
+            if proc.poll() is not None:
+                logger.warning("Xvfb exited immediately with code %d", proc.returncode)
+                return None
             time.sleep(0.1)
+        if not lock.exists():
+            logger.warning("Xvfb lock file %s never appeared", lock)
+            return None
         logger.info("Started Xvfb on %s", display)
         return display
     except Exception:

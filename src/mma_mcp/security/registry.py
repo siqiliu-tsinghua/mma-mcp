@@ -124,10 +124,18 @@ class CapabilityRegistry:
         for name in groups:
             allowed |= self._resolve_group(name)
 
-        # If we have system symbols from the kernel, fall back to
-        # all_system_symbols minus dangerous for any group not found locally
-        if self._all_system_symbols:
-            allowed |= self._all_system_symbols - dangerous
+        # If a configured group is missing from local JSON files, log a
+        # prominent warning but do NOT fall back to all system symbols.
+        # Silently widening the whitelist would defeat the purpose of
+        # explicit group configuration.  The admin should run
+        # `mma-mcp setup` to regenerate missing group files.
+        for name in groups:
+            if name not in self._groups:
+                logger.error(
+                    "Whitelist group %r is configured but has no local JSON file. "
+                    "Symbols from this group will NOT be allowed. "
+                    "Run `mma-mcp setup` to regenerate group files.", name,
+                )
 
         allowed |= set(config.extra_allowed)
         allowed -= dangerous  # extra_blocked always wins

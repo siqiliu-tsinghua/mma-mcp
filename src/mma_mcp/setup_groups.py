@@ -79,12 +79,13 @@ _WRITE_KEYWORDS = ("Write", "Export", "Put", "Save", "Copy", "Rename",
 def _query_functionality_areas(
     session,
     all_sys: list[str],
-    batch_size: int = 500,
+    batch_size: int = 100,
 ) -> dict[str, set[str]]:
     """Query WolframLanguageData for all symbols and return {group: {symbols}}.
 
     Returns an empty dict if the network is unavailable or the query fails.
     """
+    import time
     from wolframclient.language import wlexpr
 
     group_syms: dict[str, set[str]] = {g: set() for g in
@@ -94,39 +95,64 @@ def _query_functionality_areas(
     try:
         total = len(all_sys)
         found = 0
-        print(f"  Querying WolframLanguageData for {total} symbols", end="", flush=True)
+        n_batches = (total + batch_size - 1) // batch_size
+        t_start = time.time()
+        print(f"  Querying WolframLanguageData for {total} symbols "
+              f"({n_batches} batches of {batch_size})…", flush=True)
 
+        failed_batches = 0
         for i in range(0, total, batch_size):
             batch = all_sys[i:i + batch_size]
+            batch_num = i // batch_size + 1
             wl_list = "{" + ",".join(f'"{x}"' for x in batch) + "}"
-            areas_list = session.evaluate(wlexpr(
-                f'WolframLanguageData[{wl_list}, "FunctionalityAreas"]'
-            ))
-            for sym, areas in zip(batch, areas_list):
-                if not (hasattr(areas, '__iter__') and not isinstance(areas, str)):
-                    continue
-                for area in areas:
-                    area_str = str(area).strip("'\"() ")
-                    if "Missing" in area_str or not area_str:
+            try:
+                t0 = time.time()
+                areas_list = session.evaluate(wlexpr(
+                    f'WolframLanguageData[{wl_list}, "FunctionalityAreas"]'
+                ))
+                elapsed = time.time() - t0
+            except Exception as exc:
+                failed_batches += 1
+                print(f"    batch {batch_num}/{n_batches} FAILED: {exc}", flush=True)
+                continue
+            batch_found = 0
+
+            if hasattr(areas_list, '__iter__'):
+                for sym, areas in zip(batch, areas_list):
+                    if not (hasattr(areas, '__iter__') and not isinstance(areas, str)):
                         continue
-                    found += 1
-                    if area_str == "FileSystemSymbols":
-                        # Split by read vs write flavour
-                        if any(sym.startswith(kw) or kw in sym
-                               for kw in _WRITE_KEYWORDS):
-                            group_syms["file_write"].add(sym)
-                        else:
-                            group_syms["file_read"].add(sym)
-                    elif area_str in _AREA_TO_GROUP:
-                        for grp in _AREA_TO_GROUP[area_str]:
-                            group_syms[grp].add(sym)
+                    for area in areas:
+                        area_str = str(area).strip("'\"() ")
+                        if "Missing" in area_str or not area_str:
+                            continue
+                        batch_found += 1
+                        if area_str == "FileSystemSymbols":
+                            if any(sym.startswith(kw) or kw in sym
+                                   for kw in _WRITE_KEYWORDS):
+                                group_syms["file_write"].add(sym)
+                            else:
+                                group_syms["file_read"].add(sym)
+                        elif area_str in _AREA_TO_GROUP:
+                            for grp in _AREA_TO_GROUP[area_str]:
+                                group_syms[grp].add(sym)
 
-            print(".", end="", flush=True)
+            found += batch_found
+            pct = batch_num * 100 // n_batches
+            print(f"    batch {batch_num}/{n_batches} ({pct}%) "
+                  f"+{batch_found} areas ({elapsed:.1f}s)", flush=True)
 
-        print(f" done ({found} area assignments)\n")
+        total_time = time.time() - t_start
+        total_classified = sum(len(s) for s in group_syms.values())
+        if failed_batches:
+            print(f"  Done (partial): {found} area assignments → {total_classified} symbols classified "
+                  f"({failed_batches} batches failed, {total_time:.0f}s total)\n", flush=True)
+        else:
+            print(f"  Done: {found} area assignments → {total_classified} symbols classified "
+                  f"({total_time:.0f}s total)\n", flush=True)
 
     except Exception as exc:
-        print(f"\n  WolframLanguageData query failed ({exc}); skipping enrichment.\n")
+        print(f"\n  WolframLanguageData init failed ({exc}); skipping enrichment.\n",
+              flush=True)
         return {}
 
     return group_syms
@@ -191,12 +217,21 @@ def run_setup(kernel_path: str | None = None) -> None:
         print("Generating safe groups…")
 
         # arithmetic: NumericFunction or Listable attributes
+        # Run entirely inside WL to avoid wolframclient hanging on the
+        # Select over 7000+ symbols.  Return only short names.
         raw_arith = session.evaluate(wlexpr(
-            'Map[Last[StringSplit[#,"`"]]&,'
-            ' Select[Names["System`*"],'
-            '  MemberQ[Attributes[ToExpression[#]], NumericFunction|Listable]&]]'
+            'Module[{syms = Names["System`*"], result},'
+            '  result = Select[syms,'
+            '    Quiet@Check['
+            '      MemberQ[Attributes[Evaluate@ToExpression[#]],'
+            '        NumericFunction|Listable], False]&];'
+            '  Map[Last@StringSplit[#, "`"]&, result]'
+            ']'
         ))
-        arithmetic = {_short(s) for s in raw_arith} | from_seeds([
+        print(f"    (kernel found {len(raw_arith) if hasattr(raw_arith, '__len__') else 0}"
+              f" NumericFunction|Listable symbols)")
+        arithmetic = set(raw_arith) if hasattr(raw_arith, '__iter__') else set()
+        arithmetic = {str(s) for s in arithmetic} | from_seeds([
             "Pi", "E", "I", "Infinity", "DirectedInfinity", "Degree",
             "Sin", "Cos", "Tan", "Cot", "Sec", "Csc",
             "ArcSin", "ArcCos", "ArcTan", "ArcCot", "ArcSec", "ArcCsc",
@@ -460,7 +495,7 @@ def run_setup(kernel_path: str | None = None) -> None:
                 # Env / shell
                 "Install", "Uninstall",
                 "Environment", "SetEnvironment",
-                "SystemOpen", "FindProgram",
+                "SystemOpen", "SystemShell", "FindProgram",
                 "SystemDialogInput", "PrintDialog",
                 "ReadPipe", "WritePipe",
                 "NETLink", "JLink",
@@ -478,6 +513,7 @@ def run_setup(kernel_path: str | None = None) -> None:
                 "FileNames", "FileExistsQ", "DirectoryQ", "FileType",
                 "FileDate", "FileByteCount", "FileSize", "FileInformation",
                 "FindFile", "DirectoryListing", "ParentDirectory",
+                "SetDirectory", "ResetDirectory",
                 "$HomeDirectory", "$UserDirectory", "$RootDirectory",
                 "$InitialDirectory", "$BaseDirectory",
                 "$UserBaseDirectory", "$InstallationDirectory",
@@ -518,8 +554,8 @@ def run_setup(kernel_path: str | None = None) -> None:
         dynamic_eval = (
             by_pattern("ToExpression*")
             | danger_seeds([
-                "ToExpression", "Uncompress",
-                "ReadProtected",
+                "ToExpression", "Evaluate", "MakeExpression",
+                "Uncompress", "ReadProtected",
             ])
         )
         _write_group("dynamic_eval", dynamic_eval | wld.get("dynamic_eval", set()))

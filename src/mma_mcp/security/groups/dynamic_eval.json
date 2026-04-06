@@ -1,1 +1,17 @@
-["Activate", "Defer", "EvaluationData", "HoldAllComplete", "HoldComplete", "IgnoringInactive", "Inactivate", "Inactive", "ReadProtected", "ReleaseHold", "ToExpression", "Uncompress", "Unevaluated"]
+[
+  "Activate",
+  "Defer",
+  "Evaluate",
+  "EvaluationData",
+  "HoldAllComplete",
+  "HoldComplete",
+  "IgnoringInactive",
+  "Inactivate",
+  "Inactive",
+  "MakeExpression",
+  "ReadProtected",
+  "ReleaseHold",
+  "ToExpression",
+  "Uncompress",
+  "Unevaluated"
+]

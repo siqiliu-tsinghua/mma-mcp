@@ -209,6 +209,21 @@ class OAuthServer:
         # Validate required OAuth params
         if not redirect_uri or not client_id:
             return HTMLResponse("Missing redirect_uri or client_id", status_code=400)
+
+        # Validate client_id is registered and redirect_uri matches
+        client = self._clients.get(client_id)
+        if client is None:
+            return HTMLResponse("Unknown client_id", status_code=400)
+        if redirect_uri not in client.redirect_uris:
+            logger.warning(
+                "OAuth: redirect_uri %r not in registered URIs for client %s",
+                redirect_uri, client_id,
+            )
+            return HTMLResponse("redirect_uri not registered for this client", status_code=400)
+
+        # PKCE is mandatory (OAuth 2.1)
+        if not code_challenge:
+            return HTMLResponse("PKCE code_challenge is required", status_code=400)
         if code_challenge_method and code_challenge_method != "S256":
             return HTMLResponse("Only S256 is supported", status_code=400)
 

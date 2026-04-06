@@ -83,7 +83,7 @@ class App:
         self, registry: CapabilityRegistry,
     ) -> dict[str, RoleRuntime]:
         """Build per-role permission sets and security filters."""
-        from mma_mcp.tools import evaluate, math  # noqa: F401
+        from mma_mcp.tools import data, evaluate, math, plot, query  # noqa: F401
         all_tool_names = frozenset(get_registered())
         config = self.config
 

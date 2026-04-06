@@ -42,7 +42,7 @@ def simplify(ctx: ToolContext, expression: str, full: bool = False, assumptions:
     else:
         expr = f"{fn}[{expression}]"
     result = ctx.kernel.evaluate_to_string(
-        expr, ctx.default_format, timeout=ctx.timeout, hard_timeout=ctx.hard_timeout,
+        expr, ctx.default_format, timeout=ctx.timeout, hard_timeout=ctx.hard_timeout, context=ctx.session_context,
     )
     return ctx.truncate(result)
 
@@ -74,7 +74,7 @@ def integrate(
     else:
         expr = f"{fn}[{expression}, {variable}]"
     result = ctx.kernel.evaluate_to_string(
-        expr, ctx.default_format, timeout=ctx.timeout, hard_timeout=ctx.hard_timeout,
+        expr, ctx.default_format, timeout=ctx.timeout, hard_timeout=ctx.hard_timeout, context=ctx.session_context,
     )
     return ctx.truncate(result)
 
@@ -94,6 +94,6 @@ def differentiate(ctx: ToolContext, expression: str, variable: str, order: int =
     else:
         expr = f"D[{expression}, {{{variable}, {order}}}]"
     result = ctx.kernel.evaluate_to_string(
-        expr, ctx.default_format, timeout=ctx.timeout, hard_timeout=ctx.hard_timeout,
+        expr, ctx.default_format, timeout=ctx.timeout, hard_timeout=ctx.hard_timeout, context=ctx.session_context,
     )
     return ctx.truncate(result)
