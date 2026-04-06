@@ -316,15 +316,13 @@ class TestToolsWildcard:
     """Regression test: tools='*' must resolve to ALL registered tools."""
 
     def test_tools_wildcard_includes_all_tools(self):
-        from mma_mcp.tools import get_registered, data, evaluate, math, plot, query  # noqa: F401
+        from mma_mcp.tools import get_registered, evaluate  # noqa: F401
         all_tools = set(get_registered())
-        # These must all be present
-        expected = {"evaluate", "evaluate_image", "solve", "simplify",
-                    "integrate", "differentiate", "plot", "data_query"}
+        expected = {"evaluate", "evaluate_image"}
         assert expected <= all_tools, f"Missing tools: {expected - all_tools}"
 
     def test_build_role_runtimes_wildcard(self):
-        """_build_role_runtimes with tools='*' must include plot, data_query, etc."""
+        """_build_role_runtimes with tools='*' must include all registered tools."""
         from mma_mcp.config import AppConfig, AuthConfig, RoleConfig
         from mma_mcp.security.registry import CapabilityRegistry
         from mma_mcp.server import App
@@ -339,6 +337,5 @@ class TestToolsWildcard:
         runtimes = app._build_role_runtimes(registry)
 
         admin_tools = runtimes["admin"].allowed_tools
-        assert "plot" in admin_tools
-        assert "data_query" in admin_tools
         assert "evaluate" in admin_tools
+        assert "evaluate_image" in admin_tools

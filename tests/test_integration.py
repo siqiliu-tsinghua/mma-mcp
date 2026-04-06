@@ -180,47 +180,38 @@ class TestSessionIsolation:
 
 
 # ===================================================================
-# 4. Tool-level integration (simulate what MCP tools do)
+# 4. Security filter + kernel pipeline (various domains)
 # ===================================================================
 
-class TestToolSimulation:
+class TestFilterKernelPipeline:
 
-    def test_solve_tool_flow(self, kernel, registry):
-        """Simulate the solve tool: check security → build expr → evaluate."""
+    def test_solve(self, kernel, registry):
+        """Solve passes security filter and returns correct result."""
         config = SecurityConfig(mode="blacklist")
         filt = registry.build_filter(config)
-        equations = "x^2 - 5 x + 6 == 0"
-        variables = "x"
-        filt.check(equations)
-        filt.check(variables)
-        result = kernel.evaluate_to_string(
-            f"Solve[{equations}, {variables}]", "TeXForm",
-        )
+        expr = "Solve[x^2 - 5 x + 6 == 0, x]"
+        filt.check(expr)
+        result = kernel.evaluate_to_string(expr, "TeXForm")
         assert "2" in result and "3" in result
 
-    def test_integrate_tool_flow(self, kernel, registry):
+    def test_integrate(self, kernel, registry):
         config = SecurityConfig(mode="blacklist")
         filt = registry.build_filter(config)
-        expr = "x^2"
+        expr = "Integrate[x^2, x]"
         filt.check(expr)
-        result = kernel.evaluate_to_string(
-            f"Integrate[{expr}, x]", "TeXForm",
-        )
+        result = kernel.evaluate_to_string(expr, "TeXForm")
         assert "x^3" in result or "frac" in result
 
-    def test_differentiate_tool_flow(self, kernel, registry):
+    def test_differentiate(self, kernel, registry):
         config = SecurityConfig(mode="blacklist")
         filt = registry.build_filter(config)
-        expr = "Sin[x] Cos[x]"
+        expr = "D[Sin[x] Cos[x], x]"
         filt.check(expr)
-        result = kernel.evaluate_to_string(
-            f"D[{expr}, x]", "OutputForm",
-        )
+        result = kernel.evaluate_to_string(expr, "OutputForm")
         assert "Cos" in result or "Sin" in result
 
     @needs_display
-    def test_plot_tool_flow(self, kernel, registry):
-        """Simulate plot tool: build Plot expression → render to PNG."""
+    def test_plot_to_image(self, kernel, registry):
         config = SecurityConfig(mode="blacklist")
         filt = registry.build_filter(config)
         expr = "Plot[{Sin[x], Cos[x]}, {x, 0, 2 Pi}]"
@@ -228,24 +219,10 @@ class TestToolSimulation:
         png = kernel.evaluate_to_image(expr, timeout=15)
         assert png[:4] == b"\x89PNG"
 
-    def test_data_query_tool_flow(self, kernel, registry):
-        """Simulate data_query tool: CountryData."""
-        config = SecurityConfig(mode="blacklist")
-        filt = registry.build_filter(config)
-        expr = 'CountryData["France", "Population"]'
-        filt.check(expr)
-        result = kernel.evaluate_to_string(expr, "OutputForm", timeout=15)
-        # Should return a number (population)
-        assert len(result.strip()) > 0
-
     def test_simplify_with_assumptions(self, kernel, registry):
         config = SecurityConfig(mode="blacklist")
         filt = registry.build_filter(config)
-        expr = "Sqrt[x^2]"
-        assumptions = "x > 0"
+        expr = "Simplify[Sqrt[x^2], x > 0]"
         filt.check(expr)
-        filt.check(assumptions)
-        result = kernel.evaluate_to_string(
-            f"Simplify[{expr}, {assumptions}]", "OutputForm",
-        )
+        result = kernel.evaluate_to_string(expr, "OutputForm")
         assert result.strip() == "x"

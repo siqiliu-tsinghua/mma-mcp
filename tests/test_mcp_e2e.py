@@ -1,6 +1,6 @@
 """End-to-end tests via MCP protocol (FastMCP.call_tool).
 
-These tests create a full App → FastMCP server → call_tool pipeline,
+These tests create a full App -> FastMCP server -> call_tool pipeline,
 exercising the real Wolfram kernel through the MCP tool interface.
 
 Skip with: pytest -m "not integration"
@@ -30,17 +30,13 @@ needs_display = pytest.mark.skipif(
 
 @pytest.fixture(scope="module")
 def app():
-    """Create an App with default config (blacklist mode, all safe tools)."""
+    """Create an App with default config (blacklist mode, both tools)."""
     config = AppConfig(
         kernel=KernelConfig(timeout=15, hard_timeout=30),
         security=SecurityConfig(mode="blacklist"),
-        tools=ToolsConfig(enabled=[
-            "evaluate", "evaluate_image", "solve", "simplify",
-            "integrate", "differentiate", "plot", "data_query",
-        ]),
+        tools=ToolsConfig(enabled=["evaluate", "evaluate_image"]),
     )
     a = App(config=config)
-    # Force kernel start so all tests share one session
     a.kernel.start()
     yield a
     a.kernel.stop()
@@ -114,6 +110,47 @@ class TestEvaluateTool:
         assert text.strip().startswith("3.14159")
 
     @pytest.mark.asyncio
+    async def test_solve_via_evaluate(self, mcp):
+        result = await mcp.call_tool("evaluate", {
+            "expression": "Solve[x^2 - 5x + 6 == 0, x]",
+        })
+        text = get_text(result)
+        assert "2" in text and "3" in text
+
+    @pytest.mark.asyncio
+    async def test_integrate_via_evaluate(self, mcp):
+        result = await mcp.call_tool("evaluate", {
+            "expression": "Integrate[x^2, x]",
+        })
+        text = get_text(result)
+        assert "x" in text
+
+    @pytest.mark.asyncio
+    async def test_differentiate_via_evaluate(self, mcp):
+        result = await mcp.call_tool("evaluate", {
+            "expression": "D[Sin[x] Cos[x], x]",
+        })
+        text = get_text(result)
+        assert "Cos" in text or "Sin" in text or "cos" in text or "sin" in text
+
+    @pytest.mark.asyncio
+    async def test_simplify_via_evaluate(self, mcp):
+        result = await mcp.call_tool("evaluate", {
+            "expression": "Simplify[Sin[x]^2 + Cos[x]^2]",
+        })
+        text = get_text(result)
+        assert "1" in text
+
+    @pytest.mark.asyncio
+    async def test_data_query_via_evaluate(self, mcp):
+        result = await mcp.call_tool("evaluate", {
+            "expression": 'ElementData["Gold", "AtomicNumber"]',
+            "form": "OutputForm",
+        })
+        text = get_text(result)
+        assert "79" in text
+
+    @pytest.mark.asyncio
     async def test_security_blocks_dangerous(self, mcp):
         """Dangerous expressions should be caught by the security filter."""
         result = await mcp.call_tool("evaluate", {
@@ -133,56 +170,14 @@ class TestEvaluateTool:
 
 
 # ===================================================================
-# Tests: math tools
+# Tests: evaluate_image tool
 # ===================================================================
 
-class TestMathTools:
-
-    @pytest.mark.asyncio
-    async def test_solve(self, mcp):
-        result = await mcp.call_tool("solve", {
-            "equations": "x^2 - 5x + 6 == 0",
-            "variables": "x",
-        })
-        text = get_text(result)
-        assert "2" in text and "3" in text
-
-    @pytest.mark.asyncio
-    async def test_integrate(self, mcp):
-        result = await mcp.call_tool("integrate", {
-            "expression": "x^2",
-            "variable": "x",
-        })
-        text = get_text(result)
-        assert "x" in text  # should contain x^3/3
-
-    @pytest.mark.asyncio
-    async def test_differentiate(self, mcp):
-        result = await mcp.call_tool("differentiate", {
-            "expression": "Sin[x] Cos[x]",
-            "variable": "x",
-        })
-        text = get_text(result)
-        assert "Cos" in text or "Sin" in text or "cos" in text or "sin" in text
-
-    @pytest.mark.asyncio
-    async def test_simplify(self, mcp):
-        result = await mcp.call_tool("simplify", {
-            "expression": "Sin[x]^2 + Cos[x]^2",
-        })
-        text = get_text(result)
-        assert "1" in text
-
-
-# ===================================================================
-# Tests: image tools
-# ===================================================================
-
-class TestImageTools:
+class TestEvaluateImageTool:
 
     @needs_display
     @pytest.mark.asyncio
-    async def test_evaluate_image(self, mcp):
+    async def test_plot_image(self, mcp):
         result = await mcp.call_tool("evaluate_image", {
             "expression": "Plot[Sin[x], {x, 0, 2 Pi}]",
         })
@@ -192,59 +187,12 @@ class TestImageTools:
 
     @needs_display
     @pytest.mark.asyncio
-    async def test_plot_tool(self, mcp):
-        result = await mcp.call_tool("plot", {
-            "expression": "Sin[x]",
-            "variable": "x",
-            "range_min": "0",
-            "range_max": "2 Pi",
-            "plot_type": "plot",
+    async def test_plot3d_image(self, mcp):
+        result = await mcp.call_tool("evaluate_image", {
+            "expression": "Plot3D[Sin[x] Cos[y], {x, -Pi, Pi}, {y, -Pi, Pi}]",
         })
         png = get_image_data(result)
         assert png[:4] == b"\x89PNG"
-
-    @needs_display
-    @pytest.mark.asyncio
-    async def test_plot_3d(self, mcp):
-        result = await mcp.call_tool("plot", {
-            "expression": "Sin[x] Cos[y]",
-            "variable": "x",
-            "range_min": "-Pi",
-            "range_max": "Pi",
-            "variable2": "y",
-            "range2_min": "-Pi",
-            "range2_max": "Pi",
-            "plot_type": "plot3d",
-        })
-        png = get_image_data(result)
-        assert png[:4] == b"\x89PNG"
-
-
-# ===================================================================
-# Tests: data_query tool
-# ===================================================================
-
-class TestDataQueryTool:
-
-    @pytest.mark.asyncio
-    async def test_country_data(self, mcp):
-        result = await mcp.call_tool("data_query", {
-            "source": "country",
-            "entity": "France",
-            "property": "Population",
-        })
-        text = get_text(result)
-        assert len(text.strip()) > 0
-
-    @pytest.mark.asyncio
-    async def test_element_data(self, mcp):
-        result = await mcp.call_tool("data_query", {
-            "source": "element",
-            "entity": "Gold",
-            "property": "AtomicNumber",
-        })
-        text = get_text(result)
-        assert "79" in text
 
 
 # ===================================================================
@@ -260,7 +208,6 @@ class TestErrorHandling:
             "expression": "Plot[",
         })
         text = get_text(result)
-        # Should get some result (possibly error from WL), not an exception
         assert isinstance(text, str)
 
     @pytest.mark.asyncio

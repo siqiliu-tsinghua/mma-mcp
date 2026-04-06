@@ -103,7 +103,7 @@
 - [x] `query` — WolframAlpha 风格自然语言查询（需启用 external_services 组）
 - [x] `plot` — 语义化绘图入口（14 种图表类型）
 - [x] `data_query` — 内置知识库查询（20 种数据源，大部分离线可用）
-- [ ] 更多工具按需添加…
+- [x] 工具精简：删除 solve/simplify/integrate/differentiate/plot/data_query/query，仅保留 evaluate + evaluate_image 两个通用工具
 
 ## Phase 4: 健壮性
 

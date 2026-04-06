@@ -297,7 +297,7 @@ _WRITE_KEYWORDS = ("Write", "Export", "Put", "Save", "Copy", "Rename",
 
 # ---------------------------------------------------------------------------
 # Safe seeds — symbols that WLD classifies as PacletSymbols (skipped) but
-# should be in safe groups for data_query tool support.
+# should be in safe groups (curated data functions bundled with kernel).
 # ---------------------------------------------------------------------------
 
 SAFE_SEEDS: dict[str, list[str]] = {

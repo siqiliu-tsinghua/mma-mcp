@@ -324,7 +324,7 @@ def register_tools(mcp: Any, ctx: ToolContext, enabled: list[str]) -> list[str]:
     Returns the list of tool names that were actually registered.
     """
     # Ensure tool modules are imported so they call @register
-    from mma_mcp.tools import data, evaluate, math, plot, query  # noqa: F401
+    from mma_mcp.tools import evaluate  # noqa: F401
 
     registered: list[str] = []
     for name in enabled:

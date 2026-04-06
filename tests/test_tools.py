@@ -68,11 +68,10 @@ class TestToolRegistry:
 
     def test_get_registered_includes_builtin_tools(self):
         """After importing tool modules, registry contains expected tools."""
-        from mma_mcp.tools import evaluate, math  # noqa: F401
+        from mma_mcp.tools import evaluate  # noqa: F401
         reg = get_registered()
         assert "evaluate" in reg
-        assert "solve" in reg
-        assert "integrate" in reg
+        assert "evaluate_image" in reg
 
     def test_register_decorator(self):
         """@register adds a function to the registry."""
@@ -173,7 +172,7 @@ class TestApplyRolePolicy:
     def _setup_rbac_ctx(self):
         """Build a ctx with two roles: admin (no filter) and reader (restrictive)."""
         admin_runtime = RoleRuntime(
-            allowed_tools=frozenset({"evaluate", "solve"}),
+            allowed_tools=frozenset({"evaluate", "evaluate_image"}),
             expr_filter=None,  # security = "none"
         )
         reader_filter = ExpressionFilter(
@@ -249,7 +248,7 @@ class TestApplyRolePolicy:
         tok = current_user.set(UserIdentity(username="bob", role="reader"))
         try:
             with pytest.raises(_AccessDenied):
-                _apply_role_policy(ctx, "solve")  # reader can't use solve
+                _apply_role_policy(ctx, "evaluate_image")  # reader can't use evaluate_image
         finally:
             current_user.reset(tok)
 

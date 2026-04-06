@@ -57,7 +57,8 @@ class TestDefaults:
     def test_tools_defaults(self):
         t = ToolsConfig()
         assert "evaluate" in t.enabled
-        assert "solve" in t.enabled
+        assert "evaluate_image" in t.enabled
+        assert len(t.enabled) == 2
 
     def test_auth_defaults(self):
         a = AuthConfig()

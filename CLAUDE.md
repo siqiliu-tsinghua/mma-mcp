@@ -34,11 +34,7 @@ mma-mcp/
 │       │       ├── system_exec.json, file_read.json, ...             # 6 dangerous groups
 │       │       └── (regenerate via: mma-mcp setup)
 │       ├── tools/
-│       │   ├── evaluate.py        # evaluate / evaluate_image
-│       │   ├── math.py            # solve / simplify / integrate / differentiate
-│       │   ├── plot.py            # plot (14 plot types → PNG)
-│       │   ├── data.py            # data_query (20 curated data sources)
-│       │   └── query.py           # WolframAlpha natural language query
+│       │   └── evaluate.py        # evaluate (text) / evaluate_image (PNG)
 │       └── utils.py               # Result formatting, error handling
 ├── scripts/
 │   └── generate_groups.wl         # Regenerate group JSONs from local kernel
@@ -110,15 +106,10 @@ deny_groups = ["system_exec", "networking", "file_write", "dynamic_eval"]
 
 | Tool | Description |
 |------|-------------|
-| `evaluate` | Execute arbitrary WL expression, return string result |
-| `evaluate_image` | Execute WL expression, return PNG image (for plots/graphics) |
-| `solve` | Solve equations or systems of equations |
-| `simplify` | Simplify mathematical expressions |
-| `integrate` | Symbolic or numerical integration |
-| `differentiate` | Symbolic differentiation |
-| `plot` | Structured plotting (14 plot types), return PNG image |
-| `data_query` | Query built-in curated data (20 sources: country, element, planet, …) |
-| `query` | WolframAlpha natural language query (requires `external_services` group) |
+| `evaluate` | Execute any WL expression, return text result (TeXForm/OutputForm/etc.) |
+| `evaluate_image` | Execute any WL expression, return PNG image (for plots/graphics) |
+
+All Wolfram Language capabilities (Solve, Integrate, Plot, CountryData, WolframAlpha, etc.) are accessed through these two universal tools. Security is enforced at the expression level via capability groups, not at the tool level.
 
 ## Deployment Scenario
 

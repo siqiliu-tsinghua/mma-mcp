@@ -98,12 +98,6 @@ class ToolsConfig:
     enabled: list[str] = field(default_factory=lambda: [
         "evaluate",
         "evaluate_image",
-        "solve",
-        "simplify",
-        "integrate",
-        "differentiate",
-        "plot",
-        "data_query",
     ])
 
 
@@ -557,17 +551,11 @@ deny_groups = [
 # ─── MCP Tools ────────────────────────────────────────────────────────────────
 
 [tools]
-# MCP tools to expose to clients. Remove a line to disable that tool.
+# MCP tools to expose to clients.
+# evaluate: returns text results; evaluate_image: returns PNG images.
 enabled = [
     "evaluate",
     "evaluate_image",
-    "solve",
-    "simplify",
-    "integrate",
-    "differentiate",
-    "plot",
-    "data_query",
-    # "query",  # WolframAlpha natural language — requires external_services group
 ]
 
 # ─── Authentication & Roles ─────────────────────────────────────────────────
@@ -586,9 +574,9 @@ enabled = [
 # # Inherits [tools].enabled and [security] settings (nothing to configure)
 #
 # [auth.roles.analyst]
-# tools = ["evaluate", "evaluate_image", "solve", "integrate"]
+# tools = ["evaluate"]  # text only, no image output
 # security = "whitelist"
-# allow_groups = ["math_core", "algebra", "calculus", "statistics", "visualization"]
+# allow_groups = ["math_core", "algebra", "calculus", "statistics"]
 # # Per-role resource limits (0 or omitted = inherit global [kernel] values)
 # timeout = 15
 # hard_timeout = 30
