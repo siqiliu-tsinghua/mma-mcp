@@ -75,20 +75,6 @@ def find_kernel(hint: str | None = None) -> str | None:
     return None
 
 
-def find_wolframscript(hint: str | None = None) -> str | None:
-    """Locate wolframscript binary.
-
-    Resolution order:
-      1. *hint* (explicit path from config)
-      2. ``shutil.which("wolframscript")``
-
-    Returns the first path that exists, or None.
-    """
-    if hint and Path(hint).exists():
-        return hint
-    return shutil.which("wolframscript")
-
-
 _display_available: bool = False
 
 # System packages required by WolframNB (Qt-based renderer)

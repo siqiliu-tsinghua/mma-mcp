@@ -24,7 +24,6 @@ logger = logging.getLogger(__name__)
 @dataclass
 class KernelConfig:
     mathkernel: str = ""        # path to MathKernel/WolframKernel; empty → auto
-    wolframscript: str = ""     # path to wolframscript; empty → auto (used by setup)
     timeout: int = 30           # WL-side TimeConstrained timeout in seconds; 0 = no limit
     hard_timeout: int = 60      # Python-side hard timeout — force-restart kernel if stuck; 0 = no limit
     max_result_size: int = 65536  # max result string length (chars); 0 = no limit
@@ -190,7 +189,6 @@ def _build_kernel_config(raw: dict[str, Any]) -> KernelConfig:
     defaults = KernelConfig()
     return KernelConfig(
         mathkernel=sec.get("mathkernel", ""),
-        wolframscript=sec.get("wolframscript", ""),
         timeout=sec.get("timeout", defaults.timeout),
         hard_timeout=sec.get("hard_timeout", defaults.hard_timeout),
         max_result_size=sec.get("max_result_size", defaults.max_result_size),
@@ -312,9 +310,6 @@ def _validate(config: AppConfig) -> None:
         )
     if config.kernel.mathkernel and not Path(config.kernel.mathkernel).exists():
         errors.append(f"kernel.mathkernel path does not exist: {config.kernel.mathkernel}")
-    if config.kernel.wolframscript and not Path(config.kernel.wolframscript).exists():
-        errors.append(f"kernel.wolframscript path does not exist: {config.kernel.wolframscript}")
-
     # server
     if config.server.transport not in ("stdio", "http"):
         errors.append(
@@ -430,10 +425,6 @@ _DEFAULT_TOML = """\
 # Path to MathKernel / WolframKernel binary.
 # Leave empty to auto-detect (searches WOLFRAM_KERNEL env → which → common paths).
 mathkernel = ""
-
-# Path to wolframscript binary. Used by `mma-mcp setup` to generate symbol groups.
-# Leave empty to auto-detect via `which wolframscript`.
-wolframscript = ""
 
 # Per-evaluation timeout in seconds (Wolfram Language TimeConstrained).
 # The kernel cooperatively aborts the computation and returns $Aborted.

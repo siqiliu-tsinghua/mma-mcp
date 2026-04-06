@@ -10,7 +10,7 @@ from mma_mcp.tools import ToolContext, register
 
 
 @register("query")
-def query(ctx: ToolContext, input: str, format: str = "plaintext") -> str:
+def query(ctx: ToolContext, input: str) -> str:
     """Query Wolfram|Alpha with a natural language input.
 
     This tool sends the input to Wolfram|Alpha via the kernel's built-in
@@ -22,9 +22,6 @@ def query(ctx: ToolContext, input: str, format: str = "plaintext") -> str:
     Args:
         input:  Natural language query, e.g. "population of France",
                 "integrate sin(x) from 0 to pi", "weather in Beijing".
-        format: Result format — "plaintext" (default, text summary) or
-                "image" (returns a pod image, use evaluate_image instead
-                for full visual output).
     """
     # Security check covers WolframAlpha symbol
     expr = f'WolframAlpha["{_escape_wl_string(input)}", "Result"]'

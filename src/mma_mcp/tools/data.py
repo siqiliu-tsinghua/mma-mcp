@@ -1,7 +1,9 @@
 """Curated data query tool — access Wolfram's built-in knowledge base.
 
-Uses local curated data functions (CountryData, ElementData, etc.) that
-are bundled with Wolfram Engine and do NOT require internet access.
+Most data functions (CountryData, ElementData, etc.) are bundled with
+Wolfram Engine and work offline.  A few (FinancialData, WeatherData)
+fetch live data from the internet and require the ``external_services``
+security group to be enabled.
 """
 
 from __future__ import annotations
@@ -17,8 +19,6 @@ _DATA_SOURCES = {
     "planet": "PlanetData",
     "star": "StarData",
     "unit": "UnitConvert",
-    "financial": "FinancialData",
-    "weather": "WeatherData",
     "movie": "MovieData",
     "word": "WordData",
     "genome": "GenomeData",
@@ -30,6 +30,9 @@ _DATA_SOURCES = {
     "satellite": "SatelliteData",
     "aircraft": "AircraftData",
     "food": "FoodData",
+    # These fetch live data from the internet — require external_services group
+    "financial": "FinancialData",
+    "weather": "WeatherData",
 }
 
 
@@ -43,13 +46,14 @@ def data_query(
     """Query Wolfram's built-in curated data.
 
     Most data sources are bundled locally with Wolfram Engine and work
-    offline. Some (financial, weather) may require internet for live data.
+    offline. Two sources fetch live data from the internet and require
+    the ``external_services`` security group: ``financial``, ``weather``.
 
     Args:
         source:   Data source — one of: country, city, element, chemical,
-                  planet, star, unit, financial, weather, movie, word,
-                  genome, polyhedron, knot, graph, isotope, mineral,
-                  satellite, aircraft, food.
+                  planet, star, unit, movie, word, genome, polyhedron,
+                  knot, graph, isotope, mineral, satellite, aircraft, food,
+                  financial (live), weather (live).
         entity:   The entity to query, e.g. "France", "Gold", "Mars".
         property: Optional property to retrieve, e.g. "Population",
                   "AtomicNumber", "Radius". Omit to get a summary or

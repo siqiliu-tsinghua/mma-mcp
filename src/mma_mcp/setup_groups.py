@@ -296,6 +296,23 @@ _WRITE_KEYWORDS = ("Write", "Export", "Put", "Save", "Copy", "Rename",
                     "Delete", "Create", "Set", "Move")
 
 # ---------------------------------------------------------------------------
+# Safe seeds — symbols that WLD classifies as PacletSymbols (skipped) but
+# should be in safe groups for data_query tool support.
+# ---------------------------------------------------------------------------
+
+SAFE_SEEDS: dict[str, list[str]] = {
+    "quantitative": [
+        # Curated data functions — bundled with Wolfram Engine, work offline
+        "CountryData", "CityData", "ElementData", "ChemicalData",
+        "PlanetData", "StarData", "UnitConvert",
+        "MovieData", "WordData", "GenomeData",
+        "PolyhedronData", "KnotData", "GraphData",
+        "IsotopeData", "MineralData", "SatelliteData",
+        "AircraftData", "FoodData",
+    ],
+}
+
+# ---------------------------------------------------------------------------
 # Hard-coded dangerous seeds — always included regardless of WLD data.
 # These are the most critical symbols that MUST be in dangerous groups
 # even if WLD classification is incomplete or unavailable.
@@ -379,6 +396,8 @@ DANGEROUS_SEEDS: dict[str, list[str]] = {
         "SemanticImport", "SemanticImportString",
         "Interpreter", "APIFunction", "FormFunction",
         "AskFunction", "AskAppend",
+        # Live data functions that fetch from the internet
+        "FinancialData", "WeatherData",
     ],
 }
 
@@ -559,6 +578,10 @@ def _classify_symbols(
     if unmapped_areas:
         print(f"  Warning: {len(unmapped_areas)} unmapped FunctionalityAreas: "
               f"{sorted(unmapped_areas)[:10]}{'...' if len(unmapped_areas) > 10 else ''}")
+
+    # Add safe seeds (symbols WLD classifies as PacletSymbols but we need)
+    for group_name, seeds in SAFE_SEEDS.items():
+        groups[group_name] |= set(seeds)
 
     # Add hard-coded dangerous seeds (always, regardless of WLD)
     for group_name, seeds in DANGEROUS_SEEDS.items():

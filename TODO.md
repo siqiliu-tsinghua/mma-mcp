@@ -170,9 +170,9 @@
 
 ### P2：契约与文档
 
-- [ ] `query` 工具的 `format` 参数无实际效果——要么实现分支，要么移除参数
-- [ ] `data_query` 中 `WeatherData`/`FinancialData` 可能绕过安全分组——确认联网语义后归入危险组或拆分 `live_data` 组
-- [ ] `kernel.wolframscript` 配置项未接入 `mma-mcp setup` 流程——删除文档说明或实际接入
+- [x] `query` 工具的 `format` 参数无实际效果——已移除该参数
+- [x] `data_query` 中 `WeatherData`/`FinancialData` 绕过安全分组——已加入 `external_services` 危险种子，本地数据函数加入 `quantitative` 安全种子
+- [x] `kernel.wolframscript` 配置项未接入——已删除该配置项和 `find_wolframscript` 函数（从未被使用）
 
 ### 待排查
 
