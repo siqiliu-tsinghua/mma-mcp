@@ -166,7 +166,7 @@
 - [x] **会话隔离不一致**：已统一 `simplify()`/`integrate()`/`differentiate()` 的 `context=ctx.session_context` 传递。
 - [x] **Xvfb 启动假阳性**：`_start_xvfb()` 现在检查进程是否立即退出 + lock 文件是否最终出现，两者任一失败返回 None。
 - [x] **WLD enrichment 全损**：改为 batch 级 try/except，失败的 batch 跳过并计数，已完成结果保留。
-- [ ] **图形检测 Debian 耦合**：`check_graphics()` 应先检查现有 DISPLAY，再尝试 Xvfb；返回真实模式 `display`/`xvfb`/`none`。包名提示标注为 Debian/Ubuntu 专用。
+- [x] **图形检测 Debian 耦合**：`check_graphics()` 现在先检查现有 DISPLAY，再尝试 Xvfb；返回 `display`/`xvfb`/`none`。包名提示已标注为 Debian/Ubuntu 专用。
 
 ### P2：契约与文档
 
