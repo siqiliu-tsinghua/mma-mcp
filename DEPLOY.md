@@ -124,7 +124,27 @@ sudo chmod 600 /etc/mma-mcp.env
 
 ---
 
-## 六、systemd 服务
+## 六、创建专用服务用户
+
+```bash
+# 创建无登录 shell 的系统用户
+sudo useradd -r -s /usr/sbin/nologin -m -d /opt/mma-mcp mma
+
+# 将项目目录所有权交给该用户
+sudo chown -R mma:mma /opt/mma-mcp
+
+# 让 mma 用户可以读取 Mathematica license
+# （根据实际安装路径调整，通常 /usr/local/Wolfram 已经是 world-readable）
+ls -la /usr/local/Wolfram/Mathematica/14.3/Configuration/Licensing/
+```
+
+> **说明：** 绑定低端口（<1024，如 443）是 Linux capability（`CAP_NET_BIND_SERVICE`），
+> 不是传统的组权限，无法通过加组解决。下面在 Caddy 的 systemd 服务中通过
+> `AmbientCapabilities` 授予，仅对该服务进程生效，不影响全局。
+
+---
+
+## 七、systemd 服务
 
 ### mma-mcp 服务
 
@@ -135,7 +155,8 @@ Description=mma-mcp Wolfram Engine MCP Server
 After=network.target
 
 [Service]
-User=你的用户名
+User=mma
+Group=mma
 WorkingDirectory=/opt/mma-mcp
 EnvironmentFile=/etc/mma-mcp.env
 ExecStart=/opt/mma-mcp/.venv/bin/mma-mcp serve --transport http --host 127.0.0.1 --port 8000
@@ -153,18 +174,23 @@ EOF
 sudo tee /etc/systemd/system/caddy-mma.service > /dev/null << 'EOF'
 [Unit]
 Description=Caddy reverse proxy for mma-mcp
-After=network.target
+After=network.target mma-mcp.service
 
 [Service]
-User=你的用户名
+User=mma
+Group=mma
 WorkingDirectory=/opt/mma-mcp
 EnvironmentFile=/etc/mma-mcp.env
 ExecStart=/usr/local/bin/caddy run --config /opt/mma-mcp/Caddyfile
 Restart=on-failure
 RestartSec=5
 
+# 允许绑定 443 端口（无需 root）
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
 [Install]
-WantedBy=multi-user.default
+WantedBy=multi-user.target
 EOF
 ```
 
@@ -185,15 +211,17 @@ sudo journalctl -u caddy-mma -f
 
 ---
 
-## 七、验证部署
+## 八、验证部署
 
 ```bash
 # 本地测试（VPS 上）
-curl -v http://127.0.0.1:8000/mcp
-# 应返回 405 Method Not Allowed（MCP 端点不接受 GET）
+# 需要带 auth token，否则返回 401
+source /etc/mma-mcp.env
+curl -v -H "Authorization: Bearer $MMA_MCP_AUTH_TOKEN" http://127.0.0.1:8000/mcp
+# 应返回 405 Method Not Allowed（MCP 端点不接受 GET，说明服务正常）
 
 # HTTPS 测试
-curl -v https://mma.yourdomain.com/mcp
+curl -v -H "Authorization: Bearer $MMA_MCP_AUTH_TOKEN" https://mma.yourdomain.com/mcp
 # 应返回 405，且证书有效
 
 # 如果证书未签发，检查 Caddy 日志：
@@ -202,7 +230,7 @@ sudo journalctl -u caddy-mma --no-pager | tail -30
 
 ---
 
-## 八、Claude Web 连通测试
+## 九、Claude Web 连通测试
 
 1. 打开 https://claude.ai
 2. Settings -> MCP Servers -> Add Server

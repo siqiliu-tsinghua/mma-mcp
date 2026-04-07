@@ -134,8 +134,8 @@
 
 - [ ] Claude Desktop (stdio) 连通测试
 - [x] Claude Code (stdio) 连通测试——evaluate（文本）+ evaluate_image（PNG）+ 安全过滤均正常
-- [x] Claude Code (stdio) 连通测试
-- [ ] Claude Web / ChatGPT (HTTP + Caddy) 远程连通测试
+- [x] Claude.ai (HTTP + Caddy) 远程连通测试——evaluate 文本正常，evaluate_image 图片在折叠的 tool result 中可查看
+- [x] ChatGPT (HTTP + Caddy) 远程连通测试——evaluate 文本正常，evaluate_image 图片前端不直接渲染但数据已返回，追问后可转为文件链接
 
 ### 跨平台图形渲染验证
 

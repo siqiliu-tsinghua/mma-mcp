@@ -266,7 +266,9 @@ def _build_parser() -> "argparse.ArgumentParser":
     sub.add_parser("init", help="Generate a default mma_mcp.toml")
 
     # --- setup ---
-    sub.add_parser("setup", help="Regenerate security group JSON files from local kernel")
+    p_setup = sub.add_parser("setup", help="Check graphics + generate security groups")
+    p_setup.add_argument("--force", action="store_true",
+                         help="Force regeneration of security groups even if they exist")
 
     # --- caddyfile ---
     sub.add_parser("caddyfile", help="Generate a Caddyfile for reverse proxy + HTTPS")
@@ -301,7 +303,7 @@ def main() -> None:
     if args.command == "init":
         _cmd_init()
     elif args.command == "setup":
-        _cmd_setup()
+        _cmd_setup(force=args.force)
     elif args.command == "caddyfile":
         _cmd_caddyfile()
     elif args.command == "hash-password":
@@ -371,24 +373,31 @@ def _cmd_init() -> None:
     print(f"Generated default config: {path}")
 
 
-def _cmd_setup() -> None:
+def _cmd_setup(force: bool = False) -> None:
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
     config = load_config()
     kernel_path = config.kernel.mathkernel or None
 
-    # 1. Regenerate security group JSON files
-    from mma_mcp.setup_groups import run_setup
-    run_setup(kernel_path=kernel_path)
-
-    # 2. Graphics capability check
-    print("\n--- 图形渲染检测 ---")
+    # 1. Graphics capability check (first, so user can install deps before
+    #    the slow group generation step)
+    print("--- 图形渲染检测 ---")
     from mma_mcp.kernel import check_graphics
     result = check_graphics(kernel_path=kernel_path)
     print(result.message)
     print(f"推荐配置: kernel.graphics = \"{result.mode}\"")
-
-    # Try to update config file
     _update_graphics_config(result.mode)
+
+    # 2. Regenerate security group JSON files (slow, ~1 min)
+    from mma_mcp.setup_groups import GROUPS_DIR
+    manifest_path = GROUPS_DIR / "manifest.json"
+    if not force and manifest_path.exists():
+        print(f"\n安全分组已存在 ({manifest_path})，跳过生成。")
+        print("如需重新生成，请运行: mma-mcp setup --force")
+        return
+
+    print("\n--- 安全分组生成 ---")
+    from mma_mcp.setup_groups import run_setup
+    run_setup(kernel_path=kernel_path)
 
 
 def _cmd_caddyfile() -> None:
