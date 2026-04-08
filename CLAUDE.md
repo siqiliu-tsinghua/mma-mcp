@@ -6,13 +6,14 @@ Preferred: **Chinese (Simplified)**. Fallback: English. Never use other language
 
 ## Project Overview
 
-A Model Context Protocol (MCP) server that wraps a local Wolfram Engine, enabling AI assistants (Claude, etc.) to invoke Wolfram Language computation — symbolic math, numerical analysis, data visualization, and more.
+A Model Context Protocol (MCP) server that wraps a local Wolfram Engine, enabling AI assistants (Claude, ChatGPT, etc.) to invoke Wolfram Language computation — symbolic math, numerical analysis, data visualization, and more.
 
 ## Tech Stack
 
 - **Language:** Python 3.11+
-- **MCP framework:** `mcp[cli]` (official Python SDK)
+- **MCP framework:** `mcp[cli]` (official Python SDK, FastMCP)
 - **Wolfram bridge:** `wolframclient` (local kernel via `WolframLanguageSession`)
+- **HTTP:** Starlette + uvicorn (via `mcp[cli]` transitive deps)
 - **Package manager:** `uv`
 
 ## Project Structure
@@ -22,85 +23,109 @@ mma-mcp/
 ├── src/
 │   └── mma_mcp/
 │       ├── __init__.py
-│       ├── server.py              # MCP server entry point
-│       ├── kernel.py              # Wolfram kernel lifecycle management
+│       ├── server.py              # App class + CLI entry point (argparse subcommands)
+│       ├── config.py              # TOML config loading, dataclasses, validation
+│       ├── kernel.py              # Wolfram kernel lifecycle, auto-restart, timeout
+│       ├── auth.py                # BearerAuthMiddleware, ClientIdentity contextvar
+│       ├── oauth.py               # Minimal OAuth 2.1 server (DCR + PKCE + AuthCode)
+│       ├── passwords.py           # scrypt hash/verify (stdlib only)
+│       ├── logging_config.py      # Structured logging with per-request ID
+│       ├── stdio_transport.py     # Custom stdio transport (fixes SDK pipe hang)
+│       ├── caddyfile.py           # Caddyfile generator for HTTPS deployment
+│       ├── setup_groups.py        # Generate security group JSONs from local kernel
 │       ├── security/
 │       │   ├── __init__.py
-│       │   ├── filter.py          # ExpressionFilter: AST parsing + symbol checking
-│       │   ├── registry.py        # CapabilityRegistry: load & merge group definitions
-│       │   └── groups/            # WLD-derived JSON symbol lists per group
+│       │   ├── filter.py          # ExpressionFilter: regex symbol extraction + policy check
+│       │   ├── registry.py        # CapabilityRegistry: load groups, build filters
+│       │   └── groups/            # Pre-generated JSON symbol lists per group
 │       │       ├── manifest.json  # Group metadata (28 groups: 22 safe + 6 dangerous)
-│       │       ├── math_core.json, algebra.json, calculus.json, ...  # 22 safe groups
-│       │       ├── system_exec.json, file_read.json, ...             # 6 dangerous groups
+│       │       ├── math_core.json, algebra.json, ...  # 22 safe groups
+│       │       ├── system_exec.json, file_read.json, ...  # 6 dangerous groups
 │       │       └── (regenerate via: mma-mcp setup)
-│       ├── tools/
-│       │   └── evaluate.py        # evaluate (text) / evaluate_image (PNG)
-│       └── utils.py               # Result formatting, error handling
-├── scripts/
-│   └── generate_groups.wl         # Regenerate group JSONs from local kernel
+│       └── tools/
+│           ├── __init__.py        # Tool registry, ToolContext, RoleRuntime, RBAC wrapper
+│           └── evaluate.py        # evaluate (text) / evaluate_image (PNG)
 ├── tests/
+│   ├── test_security.py           # Filter + registry unit tests
+│   ├── test_config.py             # Config loading/validation tests
+│   ├── test_auth.py               # Auth + OAuth + password tests
+│   ├── test_tools.py              # Tool registry + RBAC + session isolation tests
+│   ├── test_integration.py        # Real kernel integration tests
+│   └── test_mcp_e2e.py            # Full MCP protocol end-to-end tests
+├── scripts/
+│   └── generate_groups.wl         # Pure WL alternative for group generation
 ├── pyproject.toml
-└── CLAUDE.md
+├── CLAUDE.md
+├── ARCHITECTURE.md                # Detailed architecture documentation (Chinese)
+├── DEPLOY.md                      # VPS deployment guide
+└── README.md
 ```
 
-## Architecture Decisions
+## Architecture Overview
 
-- **Kernel session:** Use a persistent `WolframLanguageSession` (stateful, long-lived) rather than per-request kernels. Supports `session_id` for multi-session isolation.
-- **Image output:** Export WL graphics via `Export[..., "PNG"]`, return as base64-encoded `ImageContent` in MCP responses.
-- **Result format:** Default to `OutputForm`; expose `TeXForm` and `StandardForm` as options.
-- **Error handling:** Catch `WolframKernelException`; auto-restart kernel on crash.
-- **Timeout:** Two-layer timeout — WL-side `TimeConstrained` (cooperative, configurable via `kernel.timeout`) + Python-side hard timeout via `ThreadPoolExecutor` (force-restart kernel, configurable via `kernel.hard_timeout`).
-- **Result size limit:** `kernel.max_result_size` truncates oversized results before returning to MCP client.
+### Layered security model
+```
+Layer 1: Authentication (auth.py / oauth.py)
+  └─ Bearer token / OAuth 2.1 → client identity
+
+Layer 2: Role-based access control (tools/__init__.py)
+  └─ Per-role tool permissions → which MCP tools can be called
+
+Layer 3: Expression filtering (security/)
+  └─ Per-role symbol policy → which WL functions can be used
+```
+
+### Key design decisions
+
+- **Pre-kernel filtering:** Expressions are filtered in Python (regex symbol extraction) before the kernel sees them. The kernel only receives policy-compliant code.
+- **Persistent kernel session:** Single long-lived `WolframLanguageSession` with auto-restart on crash. Lazy start on first tool call.
+- **Two-layer timeout:** WL-side `TimeConstrained` (cooperative) + Python-side `ThreadPoolExecutor` hard timeout (force-restart on stuck kernel).
+- **Config-driven:** All behavior controlled via `mma_mcp.toml`. Tools, security policy, auth, resource limits — all configurable without code changes.
+- **Contextvar-based RBAC:** `current_client` and `_active_filter` contextvars propagate per-request identity and security policy, concurrent-safe.
+- **Session isolation:** Each authenticated client gets an isolated WL context namespace (`MCP$clientid\``), so variables are invisible across clients.
 
 ## Security Architecture
 
-### Core principle
-Expression filtering happens **before** the kernel sees any code. The Python layer parses the WL expression into an AST, extracts all symbol references, and checks against the active policy. The kernel only receives clean, policy-compliant expressions.
+### Expression filtering (security/filter.py)
 
-### Symbol classification
-Symbols are classified using **WolframLanguageData FunctionalityAreas** as the primary source. Each of the 208 distinct FunctionalityAreas maps to a security group. Hard-coded dangerous seeds provide a safety net for critical symbols regardless of WLD data.
+Multi-pass regex tokenizer:
+1. Detect `Symbol["X"]` patterns and `<<` (Get) operator before stripping
+2. Strip string literals (`"..."`) and WL comments (`(* ... *)`)
+3. Extract all symbol identifiers, normalize context-qualified names (`System\`Run` → `Run`)
+4. Check extracted symbols against active policy (blacklist/whitelist)
 
-Derived policies:
-- **Blacklist mode:** reject if `used_symbols ∩ dangerous_symbols ≠ ∅`
-- **Whitelist mode:** reject if `used_symbols ⊄ allowed_symbols`
+**Known limitation:** Dynamic string concatenation like `ToExpression["Ru" <> "n"]` cannot be statically detected. Mitigated by blocking `ToExpression` in `dynamic_eval` group.
 
-### Capability groups
-Symbols are pre-grouped into named capability groups (stored as JSON files). Security is configured by enabling/disabling groups, not individual symbols. Run `mma-mcp setup` to regenerate groups from the local kernel.
+### Capability groups (security/groups/)
 
-**Safe groups** (22, enabled by default in whitelist mode):
-`math_core`, `algebra`, `calculus`, `linear_algebra`, `statistics`, `number_theory`, `combinatorics`, `data_structures`, `programming`, `visualization`, `graph_theory`, `geometry`, `optimization`, `signal_processing`, `image`, `machine_learning`, `chemistry_biology`, `quantitative`, `compile`, `crypto`, `fractal`, `interpolation`
+28 groups derived from WolframLanguageData FunctionalityAreas + hard-coded dangerous seeds:
 
-**Dangerous groups** (6, blocked by default):
-`file_read`, `file_write`, `networking`, `system_exec`, `dynamic_eval`, `external_services`
+- **Safe (22):** math_core, algebra, calculus, linear_algebra, statistics, number_theory, combinatorics, data_structures, programming, visualization, graph_theory, geometry, optimization, signal_processing, image, machine_learning, chemistry_biology, quantitative, compile, crypto, fractal, interpolation
+- **Dangerous (6):** system_exec, dynamic_eval, file_read, file_write, networking, external_services
 
-### Edge case: dynamic symbol construction
-`Symbol["Run"]` and similar patterns are handled by special-casing `Symbol` calls during AST traversal — string arguments are treated as symbol names and checked against the policy.
+### Security modes
 
-`ToExpression` is always in `dynamic_eval` (dangerous) and blocked by default in both modes.
+- **Blacklist (default):** Block symbols in `deny_groups`, allow everything else. More flexible.
+- **Whitelist:** Only allow symbols in `allow_groups`, block everything else. More secure.
 
-### Runtime flow
-```
-CapabilityRegistry.load()      # startup: read all group JSONs → frozensets
-  → resolve(config)            # merge allow/deny groups → single frozenset
-  → ExpressionFilter(policy)   # bind policy
+Each role can independently choose mode and groups, or inherit the global setting.
 
-per request:
-  parse(expr_str) → AST
-  → extract_symbols(AST) → set[str]
-  → filter.check(symbols)      # frozenset intersection/difference, O(n)
-  → session.evaluate(expr)
-```
+## Authentication & Authorization
 
-### Configuration (pyproject.toml / config file)
-```toml
-[security]
-mode = "whitelist"
-allow_groups = ["math_core", "algebra", "calculus", "visualization"]
+### Three auth modes (auto-selected)
 
-# or:
-mode = "blacklist"
-deny_groups = ["system_exec", "networking", "file_write", "dynamic_eval"]
-```
+1. **Multi-client OAuth** (`[auth] enabled = true`): Client ID + password, per-role permissions, OAuth 2.1 for web MCP clients
+2. **Legacy single-token** (`server.auth_token_env`): Static Bearer token from env var
+3. **No auth** (stdio): No middleware mounted
+
+### OAuth 2.1 (oauth.py)
+- RFC 8414 metadata discovery, RFC 7591 DCR, RFC 7636 PKCE (S256)
+- Authorization Code grant with login page
+- In-memory token store with TTL and capacity limits
+
+### Password hashing (passwords.py)
+- stdlib `hashlib.scrypt` (N=16384, r=8, p=1), timing-safe verification
+- Format: `scrypt:<salt_hex>:<hash_hex>`
 
 ## MCP Tools
 
@@ -109,24 +134,25 @@ deny_groups = ["system_exec", "networking", "file_write", "dynamic_eval"]
 | `evaluate` | Execute any WL expression, return text result (TeXForm/OutputForm/etc.) |
 | `evaluate_image` | Execute any WL expression, return PNG image (for plots/graphics) |
 
-All Wolfram Language capabilities (Solve, Integrate, Plot, CountryData, WolframAlpha, etc.) are accessed through these two universal tools. Security is enforced at the expression level via capability groups, not at the tool level.
+All Wolfram Language capabilities are accessed through these two universal tools.
 
-## Deployment Scenario
+## CLI Commands
 
-HTTP 模式使用 MCP Streamable HTTP 传输：
+| Command | Description |
+|---------|-------------|
+| `mma-mcp serve` | Start the MCP server (default) |
+| `mma-mcp init` | Generate default `mma_mcp.toml` |
+| `mma-mcp setup` | Generate security group JSONs from local kernel |
+| `mma-mcp caddyfile` | Generate Caddyfile for HTTPS deployment |
+| `mma-mcp hash-password` | Hash a password for config |
+| `mma-mcp add-client` | Generate TOML snippet for a new AI client |
 
-```bash
-mma-mcp serve --transport http --host 127.0.0.1 --port 8000
-```
+## Deployment
 
-配合 Caddy 做 TLS 终结，通过 HTTPS 供 AI 客户端连接。详见 `DEPLOY.md`。
+- **stdio:** Local MCP clients (Claude Desktop, Claude Code, VS Code)
+- **HTTP:** `mma-mcp serve --transport http`, behind Caddy for TLS termination
 
-## Development Phases
-
-- **Phase 1:** Project scaffold + `kernel.py` + `security/` + minimal `evaluate` tool
-- **Phase 2:** Full tool set + image output
-- **Phase 3:** Robustness (auto-restart, session persistence)
-- **Phase 4:** Integration testing with Claude Desktop / Claude Code
+详见 `DEPLOY.md` 和 `ARCHITECTURE.md`。
 
 ## WSL 开发注意事项
 
@@ -137,6 +163,6 @@ mma-mcp serve --transport http --host 127.0.0.1 --port 8000
 
 - All tools must handle kernel errors gracefully and return user-readable error messages (never crash the MCP server).
 - Prefer `wolframclient` native Python types over raw string parsing where possible.
-- Tests go in `tests/`, use `pytest`.
+- Tests go in `tests/`, use `pytest`. Integration tests marked with `@pytest.mark.integration`.
 - No external Wolfram Cloud calls — local Engine only.
-- Group JSON files are pre-generated and committed; use `scripts/generate_groups.wl` to refresh after a Wolfram Engine upgrade.
+- Group JSON files are pre-generated and committed; use `mma-mcp setup` to refresh after a Wolfram Engine upgrade.

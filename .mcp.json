@@ -7,10 +7,7 @@
         "/home/fft/mma-mcp",
         "run",
         "mma-mcp"
-      ],
-      "env": {
-        "DISPLAY": ":99"
-      }
+      ]
     }
   }
 }

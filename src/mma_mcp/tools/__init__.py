@@ -18,14 +18,11 @@ import contextvars
 import functools
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable
+from typing import Any, Callable
 
 from mma_mcp.config import AppConfig
 from mma_mcp.kernel import KernelSession
 from mma_mcp.security.filter import ExpressionFilter
-
-if TYPE_CHECKING:
-    from mma_mcp.security.registry import CapabilityRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -66,13 +63,11 @@ class ToolContext:
         config: AppConfig,
         kernel: KernelSession,
         expr_filter: ExpressionFilter,
-        registry: "CapabilityRegistry | None" = None,
         role_runtimes: dict[str, RoleRuntime] | None = None,
     ) -> None:
         self.config = config
         self._kernel = kernel
         self.expr_filter = expr_filter
-        self._registry = registry
         self._kernel_ready = False
         self.role_runtimes: dict[str, RoleRuntime] = role_runtimes or {}
 
@@ -82,41 +77,7 @@ class ToolContext:
         if not self._kernel_ready:
             self._kernel.start()  # no-op if already running
             self._kernel_ready = True
-            self._refine_whitelist()
         return self._kernel
-
-    def _refine_whitelist(self) -> None:
-        """If in whitelist mode, refine the filter with live system symbols."""
-        if self._registry is None:
-            return
-        try:
-            system_symbols = self._kernel.get_all_system_symbols()
-            self._registry.initialize_system_symbols(system_symbols)
-        except Exception:
-            logger.warning(
-                "Could not fetch system symbols; whitelist uses group files only"
-            )
-            return
-
-        # Rebuild global default filter
-        if self.config.security.mode == "whitelist":
-            self.expr_filter = self._registry.build_filter(self.config.security)
-            logger.info("Global whitelist refined with live system symbols")
-
-        # Rebuild per-role whitelist filters
-        for role_name, runtime in self.role_runtimes.items():
-            if runtime.expr_filter is not None and runtime.expr_filter.mode == "whitelist":
-                role_conf = self.config.auth.roles.get(role_name)
-                if role_conf is not None and role_conf.security == "whitelist":
-                    from mma_mcp.config import SecurityConfig
-                    sec = SecurityConfig(
-                        mode="whitelist",
-                        allow_groups=role_conf.allow_groups,
-                        extra_blocked=role_conf.extra_blocked,
-                        extra_allowed=role_conf.extra_allowed,
-                    )
-                    runtime.expr_filter = self._registry.build_filter(sec)
-                    logger.info("Role %s whitelist refined with live system symbols", role_name)
 
     def check(self, *expressions: str) -> None:
         """Run security check on one or more expression strings.

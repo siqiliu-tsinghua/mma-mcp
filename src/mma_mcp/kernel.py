@@ -96,6 +96,7 @@ class KernelSession:
         self._kernel = kernel or find_kernel()
         self._health_check_interval = health_check_interval
         self._idle_timeout = idle_timeout
+        self._lock = threading.Lock()
         self._session: WolframLanguageSession | None = None
         self._last_activity: float = 0.0
         self._health_thread: threading.Thread | None = None
@@ -106,35 +107,38 @@ class KernelSession:
     # ------------------------------------------------------------------
 
     def start(self) -> None:
-        if self._session is not None:
-            return
-        logger.info("Starting Wolfram kernel session (kernel=%s)", self._kernel or "auto")
-        self._session = self._make_session()
-        self._session.start()
-        self._last_activity = time.monotonic()
-        logger.info("Wolfram kernel ready")
-        self._start_health_thread()
+        with self._lock:
+            if self._session is not None:
+                return
+            logger.info("Starting Wolfram kernel session (kernel=%s)", self._kernel or "auto")
+            self._session = self._make_session()
+            self._session.start()
+            self._last_activity = time.monotonic()
+            logger.info("Wolfram kernel ready")
+            self._start_health_thread()
 
     def stop(self) -> None:
         self._stop_health_thread()
-        if self._session is None:
-            return
-        logger.info("Stopping Wolfram kernel session")
-        try:
-            self._session.stop()
-        except Exception:
-            pass
-        self._session = None
-
-    def restart(self) -> None:
-        logger.warning("Restarting Wolfram kernel session")
-        self._stop_health_thread()
-        if self._session is not None:
+        with self._lock:
+            if self._session is None:
+                return
+            logger.info("Stopping Wolfram kernel session")
             try:
                 self._session.stop()
             except Exception:
                 pass
             self._session = None
+
+    def restart(self) -> None:
+        logger.warning("Restarting Wolfram kernel session")
+        self._stop_health_thread()
+        with self._lock:
+            if self._session is not None:
+                try:
+                    self._session.stop()
+                except Exception:
+                    pass
+                self._session = None
         self.start()
 
     def _make_session(self) -> WolframLanguageSession:
@@ -161,8 +165,10 @@ class KernelSession:
         )
 
     def _stop_health_thread(self) -> None:
-        if self._health_thread is not None:
+        thread = self._health_thread
+        if thread is not None:
             self._health_stop.set()
+            thread.join(timeout=5)
             self._health_thread = None
 
     def _health_loop(self) -> None:
@@ -196,13 +202,14 @@ class KernelSession:
 
     def _stop_session_only(self) -> None:
         """Stop the kernel session without stopping the health thread."""
-        if self._session is None:
-            return
-        try:
-            self._session.stop()
-        except Exception:
-            pass
-        self._session = None
+        with self._lock:
+            if self._session is None:
+                return
+            try:
+                self._session.stop()
+            except Exception:
+                pass
+            self._session = None
 
     # ------------------------------------------------------------------
     # Evaluation
@@ -235,11 +242,14 @@ class KernelSession:
 
     def _evaluate_with_hard_timeout(self, expr: Any, hard_timeout: int) -> Any:
         """Run evaluation, with optional thread-based hard timeout."""
+        session = self._session
+        if session is None:
+            raise WolframKernelException("Kernel session is not running")
         if hard_timeout <= 0:
-            return self._session.evaluate(expr)
+            return session.evaluate(expr)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(self._session.evaluate, expr)
+            future = pool.submit(session.evaluate, expr)
             try:
                 return future.result(timeout=hard_timeout)
             except concurrent.futures.TimeoutError:
@@ -303,22 +313,16 @@ class KernelSession:
             wl.Rasterize(wlexpr(inner), wlexpr('ImageResolution -> 144')),
             "PNG",
         )
-        self.evaluate(export_expr, hard_timeout=hard_timeout)
-        data = Path(tmp_path).read_bytes()
-        Path(tmp_path).unlink(missing_ok=True)
+        try:
+            self.evaluate(export_expr, hard_timeout=hard_timeout)
+            data = Path(tmp_path).read_bytes()
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
         return data
 
     def evaluate_to_image_b64(self, expr_str: str) -> str:
         """Like evaluate_to_image but returns a base64-encoded string."""
         return base64.b64encode(self.evaluate_to_image(expr_str)).decode()
-
-    def get_all_system_symbols(self) -> set[str]:
-        """Return all symbol names in the System` context.
-
-        Used by the security layer to build the whitelist at startup.
-        """
-        result = self.evaluate(wl.Names("System`*"))
-        return set(result)
 
     # ------------------------------------------------------------------
     # Internal helpers

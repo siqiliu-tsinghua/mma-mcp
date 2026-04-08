@@ -38,6 +38,15 @@ logger = logging.getLogger(__name__)
 _CODE_TTL = 600  # 10 minutes
 _TOKEN_TTL = 86400  # 24 hours
 
+# Brute-force protection
+_MAX_LOGIN_FAILURES = 5       # failures before lockout kicks in
+_MAX_LOCKOUT_SECS = 900       # 15 minute cap on lockout duration
+
+# Capacity limits — prevent unbounded memory growth
+_MAX_DCR_CLIENTS = 100      # max dynamically registered OAuth clients
+_MAX_ACCESS_TOKENS = 1000   # max concurrent access tokens
+_MAX_AUTH_CODES = 200        # max pending authorization codes
+
 
 @dataclass
 class _AuthCode:
@@ -83,10 +92,33 @@ class OAuthServer:
         self._clients: dict[str, _ClientInfo] = {}
         self._auth_codes: dict[str, _AuthCode] = {}
         self._access_tokens: dict[str, _TokenInfo] = {}
+        # Brute-force protection: {username: (failure_count, lockout_until)}
+        self._login_failures: dict[str, tuple[int, float]] = {}
 
     @property
     def multi_client(self) -> bool:
         return self._multi_client
+
+    # ------------------------------------------------------------------
+    # Housekeeping — evict expired entries
+    # ------------------------------------------------------------------
+
+    def _evict_expired(self) -> None:
+        """Remove expired tokens and auth codes. Called periodically."""
+        now = time.time()
+        expired_tokens = [k for k, v in self._access_tokens.items()
+                          if now >= v.expires_at]
+        for k in expired_tokens:
+            del self._access_tokens[k]
+        expired_codes = [k for k, v in self._auth_codes.items()
+                         if now >= v.expires_at]
+        for k in expired_codes:
+            del self._auth_codes[k]
+        if expired_tokens or expired_codes:
+            logger.debug(
+                "Evicted %d expired tokens, %d expired codes",
+                len(expired_tokens), len(expired_codes),
+            )
 
     # ------------------------------------------------------------------
     # Token validation (called by auth middleware)
@@ -155,6 +187,15 @@ class OAuthServer:
             body = await request.json()
         except Exception:
             return JSONResponse({"error": "invalid_request"}, status_code=400)
+
+        # Capacity check — prevent unbounded memory growth from DCR spam
+        if len(self._clients) >= _MAX_DCR_CLIENTS:
+            logger.warning("DCR: capacity limit reached (%d clients)", _MAX_DCR_CLIENTS)
+            return JSONResponse(
+                {"error": "server_error",
+                 "error_description": "Too many registered clients"},
+                status_code=503,
+            )
 
         client_id = secrets.token_urlsafe(24)
         redirect_uris = body.get("redirect_uris", [])
@@ -228,6 +269,11 @@ class OAuthServer:
         if code_challenge_method and code_challenge_method != "S256":
             return HTMLResponse("Only S256 is supported", status_code=400)
 
+        # Evict expired entries before issuing new code
+        self._evict_expired()
+        if len(self._auth_codes) >= _MAX_AUTH_CODES:
+            return HTMLResponse("Too many pending authorizations, try again later", status_code=503)
+
         # Issue authorization code
         code = secrets.token_urlsafe(32)
         self._auth_codes[code] = _AuthCode(
@@ -294,6 +340,15 @@ class OAuthServer:
             if not _verify_pkce(code_verifier, auth_code.code_challenge):
                 return JSONResponse({"error": "invalid_grant"}, status_code=400)
 
+        # Evict expired tokens before issuing new one
+        self._evict_expired()
+        if len(self._access_tokens) >= _MAX_ACCESS_TOKENS:
+            return JSONResponse(
+                {"error": "server_error",
+                 "error_description": "Too many active tokens"},
+                status_code=503,
+            )
+
         # Issue access token
         access_token = secrets.token_urlsafe(48)
         self._access_tokens[access_token] = _TokenInfo(
@@ -322,6 +377,10 @@ class OAuthServer:
 
         Returns ``(client_name, role, error_message)``.  *error_message* is
         empty on success.
+
+        Includes brute-force protection: after ``_MAX_LOGIN_FAILURES``
+        consecutive failures for a given username, subsequent attempts are
+        locked out with exponential backoff (capped at ``_MAX_LOCKOUT_SECS``).
         """
         password = str(form.get("password", ""))
 
@@ -329,19 +388,71 @@ class OAuthServer:
             client_name = str(form.get("username", ""))  # HTML form field name
             if not client_name:
                 return "", "", "Client ID is required"
+
+            # Check lockout
+            lockout_err = self._check_lockout(client_name)
+            if lockout_err:
+                return "", "", lockout_err
+
             assert self._auth_config is not None
             client_conf = self._auth_config.clients.get(client_name)
             if client_conf is None:
+                self._record_failure(client_name)
                 return "", "", "Invalid client ID or password"
             from mma_mcp.passwords import verify_password
             if not verify_password(password, client_conf.password_hash):
+                self._record_failure(client_name)
                 return "", "", "Invalid client ID or password"
+            self._clear_failures(client_name)
             return client_name, client_conf.role, ""
         else:
-            # Legacy single-password mode
+            # Legacy single-password mode — use fixed key for rate limiting
+            key = "__legacy__"
+            lockout_err = self._check_lockout(key)
+            if lockout_err:
+                return "", "", lockout_err
             if not hmac.compare_digest(password, self._password):
+                self._record_failure(key)
                 return "", "", "Password incorrect"
+            self._clear_failures(key)
             return "", "", ""
+
+    # ------------------------------------------------------------------
+    # Brute-force rate limiting
+    # ------------------------------------------------------------------
+
+    def _check_lockout(self, key: str) -> str:
+        """Return an error message if *key* is currently locked out, else ''."""
+        entry = self._login_failures.get(key)
+        if entry is None:
+            return ""
+        count, lockout_until = entry
+        if count < _MAX_LOGIN_FAILURES:
+            return ""
+        now = time.time()
+        if now < lockout_until:
+            remaining = int(lockout_until - now) + 1
+            logger.warning("Login locked out for %s (%d failures, %ds remaining)", key, count, remaining)
+            return f"Too many failed attempts. Try again in {remaining}s."
+        return ""
+
+    def _record_failure(self, key: str) -> None:
+        """Record a failed login attempt and compute lockout duration."""
+        entry = self._login_failures.get(key)
+        count = (entry[0] if entry else 0) + 1
+        if count >= _MAX_LOGIN_FAILURES:
+            # Exponential backoff: 2^(excess) seconds, capped
+            excess = count - _MAX_LOGIN_FAILURES
+            lockout_secs = min(2 ** excess, _MAX_LOCKOUT_SECS)
+            lockout_until = time.time() + lockout_secs
+            logger.warning("Login failure #%d for %s — locked out for %ds", count, key, lockout_secs)
+        else:
+            lockout_until = 0.0
+        self._login_failures[key] = (count, lockout_until)
+
+    def _clear_failures(self, key: str) -> None:
+        """Clear failure count on successful login."""
+        self._login_failures.pop(key, None)
 
     # ------------------------------------------------------------------
     # HTML rendering

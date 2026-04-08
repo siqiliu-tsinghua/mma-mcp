@@ -71,7 +71,6 @@ class CapabilityRegistry:
     def __init__(self, groups_dir: Path | None = None) -> None:
         self._groups_dir = groups_dir or _GROUPS_DIR
         self._groups: dict[str, frozenset[str]] = {}
-        self._all_system_symbols: frozenset[str] = frozenset()
         self._load_groups()
 
     # ------------------------------------------------------------------
@@ -91,11 +90,6 @@ class CapabilityRegistry:
                 logger.debug("Loaded group %s (%d symbols)", path.stem, len(symbols))
             except Exception:
                 logger.exception("Failed to load group file: %s", path)
-
-    def initialize_system_symbols(self, all_symbols: set[str]) -> None:
-        """Supply the full set of System` symbols (queried from kernel once at startup)."""
-        self._all_system_symbols = frozenset(all_symbols)
-        logger.info("Initialized with %d system symbols", len(self._all_system_symbols))
 
     # ------------------------------------------------------------------
     # Policy resolution

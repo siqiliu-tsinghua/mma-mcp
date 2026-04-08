@@ -3,13 +3,15 @@
 Extracts symbol references from a WL expression string using a regex tokenizer,
 then checks the resulting set against the active policy (blacklist or whitelist).
 
-wolframclient provides no WL text parser, so we use a two-pass approach:
-  1. Strip string literals to avoid false positives inside quoted text.
-  2. Extract identifier tokens (WL symbols match [A-Za-z$][A-Za-z0-9$]*).
+wolframclient provides no WL text parser, so we use a multi-pass approach:
+  1. Detect Symbol["X"] and ``<<`` before any stripping.
+  2. Strip string literals and comments to avoid false positives.
+  3. Extract identifier tokens (WL symbols match [A-Za-z$][A-Za-z0-9$]*).
 
 Edge cases handled:
   - Symbol["Run"]  → explicit regex match, string argument treated as symbol name.
   - Context-qualified names like System`Run → short name extracted.
+  - WL comments (* ... *) → stripped (supports nesting).
 """
 
 from __future__ import annotations
@@ -40,13 +42,33 @@ def _short_name(sym: str) -> str:
     return sym.rsplit("`", 1)[-1]
 
 
+def _strip_comments(expr: str) -> str:
+    """Remove WL comments ``(* ... *)`` from *expr*, supporting nesting."""
+    result: list[str] = []
+    i = 0
+    depth = 0
+    n = len(expr)
+    while i < n:
+        if i + 1 < n and expr[i] == "(" and expr[i + 1] == "*":
+            depth += 1
+            i += 2
+        elif i + 1 < n and expr[i] == "*" and expr[i + 1] == ")" and depth > 0:
+            depth -= 1
+            i += 2
+        else:
+            if depth == 0:
+                result.append(expr[i])
+            i += 1
+    return "".join(result)
+
+
 def extract_symbols(expr: str) -> set[str]:
     """Return the set of symbol short-names referenced in *expr*.
 
-    String literal contents are excluded to avoid false positives.
+    String literal contents and comments are excluded to avoid false positives.
     Symbol["Name"] patterns are treated as direct symbol references.
     """
-    # Collect Symbol["X"] references before stripping strings
+    # Collect Symbol["X"] references before stripping strings/comments
     dynamic = {m.group(1) for m in _RE_SYMBOL_CALL.finditer(expr)}
 
     # << operator is syntactic sugar for Get — inject "Get" into symbol set
@@ -55,6 +77,9 @@ def extract_symbols(expr: str) -> set[str]:
 
     # Strip string literals so their contents don't pollute symbol extraction
     stripped = _RE_STRING.sub('""', expr)
+
+    # Strip WL comments (* ... *) — prevents false positives from commented code
+    stripped = _strip_comments(stripped)
 
     # Extract all identifier tokens, keep short (unqualified) names
     symbols = {_short_name(m.group()) for m in _RE_SYMBOL.finditer(stripped)}

@@ -68,13 +68,53 @@ uv run mma-mcp init
 transport = "http"
 host = "127.0.0.1"
 port = 8000
-auth_token_env = "MMA_MCP_AUTH_TOKEN"
 
 [tls]
 enabled = true
 domain = "mma.yourdomain.com"
 dns_provider = "alidns"
 ```
+
+### 认证模式选择
+
+mma-mcp 支持两种 HTTP 认证模式，按需选择：
+
+**模式 A：多客户端 OAuth（推荐）**
+
+适用于 Claude.ai、ChatGPT 等支持 OAuth 的 Web 客户端，以及需要多用户/多角色的场景。
+
+```toml
+[auth]
+enabled = true
+
+[auth.clients.claude]
+role = "default"
+password_hash = "scrypt:..."   # 用 mma-mcp hash-password 生成
+
+[auth.roles.default]
+tools = "*"
+security = "inherit"
+```
+
+生成客户端配置片段：
+```bash
+uv run mma-mcp add-client claude --role default
+# 按提示输入密码，将输出的 TOML 片段粘贴到 mma_mcp.toml
+```
+
+Web 客户端（Claude.ai 等）连接时会走 OAuth 2.1 流程（DCR + PKCE + 授权码），
+在登录页面输入 client ID 和密码。
+
+**模式 B：静态单 token（简单场景）**
+
+适用于只有单个客户端、不需要角色区分的场景。不要同时启用 `[auth]`。
+
+```toml
+[server]
+auth_token_env = "MMA_MCP_AUTH_TOKEN"   # 从环境变量读取 token
+```
+
+Web 客户端连接时同样会走 OAuth 流程，但登录页面只显示密码字段（token 即密码）。
 
 生成 Caddyfile：
 
@@ -107,13 +147,24 @@ caddy version
 
 ## 五、准备凭据
 
+**模式 A（多客户端 OAuth）：** 密码已通过 `mma-mcp hash-password` 写入配置文件，
+环境变量文件只需要 DNS 相关凭据：
+
 ```bash
-# 生成随机 auth token
+sudo tee /etc/mma-mcp.env > /dev/null << EOF
+ALIDNS_ACCESS_KEY_ID=<你的阿里云AccessKeyID>
+ALIDNS_ACCESS_KEY_SECRET=<你的阿里云AccessKeySecret>
+EOF
+sudo chmod 600 /etc/mma-mcp.env
+```
+
+**模式 B（静态单 token）：** 需要额外设置 auth token：
+
+```bash
 MMA_MCP_AUTH_TOKEN=$(openssl rand -hex 32)
 echo "记住这个 token，Claude Web 配置时需要用:"
 echo "$MMA_MCP_AUTH_TOKEN"
 
-# 创建环境变量文件
 sudo tee /etc/mma-mcp.env > /dev/null << EOF
 MMA_MCP_AUTH_TOKEN=$MMA_MCP_AUTH_TOKEN
 ALIDNS_ACCESS_KEY_ID=<你的阿里云AccessKeyID>
@@ -214,15 +265,18 @@ sudo journalctl -u caddy-mma -f
 ## 八、验证部署
 
 ```bash
-# 本地测试（VPS 上）
-# 需要带 auth token，否则返回 401
-source /etc/mma-mcp.env
-curl -v -H "Authorization: Bearer $MMA_MCP_AUTH_TOKEN" http://127.0.0.1:8000/mcp
-# 应返回 405 Method Not Allowed（MCP 端点不接受 GET，说明服务正常）
+# 检查 OAuth 元数据端点（不需要认证）
+curl -s https://mma.yourdomain.com/.well-known/oauth-authorization-server | python3 -m json.tool
+# 应返回包含 authorization_endpoint、token_endpoint 等字段的 JSON
 
-# HTTPS 测试
-curl -v -H "Authorization: Bearer $MMA_MCP_AUTH_TOKEN" https://mma.yourdomain.com/mcp
-# 应返回 405，且证书有效
+# 检查 MCP 端点（需要认证，预期返回 401）
+curl -v https://mma.yourdomain.com/mcp
+# 应返回 401 Unauthorized，说明认证中间件正常工作
+
+# 模式 B 用户可直接带 token 测试：
+# source /etc/mma-mcp.env
+# curl -v -H "Authorization: Bearer $MMA_MCP_AUTH_TOKEN" https://mma.yourdomain.com/mcp
+# 应返回 405 Method Not Allowed（MCP 端点不接受 GET，说明服务正常）
 
 # 如果证书未签发，检查 Caddy 日志：
 sudo journalctl -u caddy-mma --no-pager | tail -30
@@ -235,7 +289,9 @@ sudo journalctl -u caddy-mma --no-pager | tail -30
 1. 打开 https://claude.ai
 2. Settings -> MCP Servers -> Add Server
 3. URL: `https://mma.yourdomain.com/mcp`
-4. 会走 OAuth 认证流程
+4. 会走 OAuth 2.1 认证流程：
+   - 模式 A：输入 client ID（如 `claude`）和密码
+   - 模式 B：仅输入密码（即 auth token）
 5. 测试对话：
    - "计算 1+1"
    - "画出 Sin[x] 在 0 到 2π 的图像"

@@ -82,6 +82,35 @@ class TestExtractSymbols:
         syms = extract_symbols("x + y * z / w - q")
         assert {"x", "y", "z", "w", "q"} <= syms
 
+    # --- Comment stripping ---
+
+    def test_comment_contents_excluded(self):
+        """Symbols inside (* ... *) comments should not be extracted."""
+        syms = extract_symbols("Sin[x] (* Don't use RunProcess here *)")
+        assert "Sin" in syms
+        assert "x" in syms
+        assert "RunProcess" not in syms
+
+    def test_nested_comments(self):
+        """Nested WL comments should be fully stripped."""
+        syms = extract_symbols("Cos[y] (* outer (* inner Run *) still comment *)")
+        assert "Cos" in syms
+        assert "y" in syms
+        assert "Run" not in syms
+
+    def test_comment_and_string_together(self):
+        """Comments and strings can coexist."""
+        syms = extract_symbols('f["hello"] (* Run *) + g[x]')
+        assert "f" in syms
+        assert "g" in syms
+        assert "x" in syms
+        assert "Run" not in syms
+        assert "hello" not in syms
+
+    def test_empty_comment(self):
+        syms = extract_symbols("(**) Sin[x]")
+        assert "Sin" in syms
+
 
 # ===================================================================
 # ExpressionFilter — blacklist mode
@@ -226,17 +255,13 @@ class TestCapabilityRegistry:
         filt.check("Solve[x^2 - 1 == 0, x]")
         filt.check("Plot[Sin[x], {x, 0, 2 Pi}]")
 
-    def test_whitelist_not_widened_by_system_symbols(self, registry):
-        """After initialize_system_symbols, whitelist=["math_core"] must still
-        reject symbols from other groups (e.g. Plot from visualization).
+    def test_whitelist_restricts_to_configured_groups(self, registry):
+        """whitelist=["math_core"] must reject symbols from other groups
+        (e.g. Plot from visualization, Solve from algebra).
 
-        Regression test for: whitelist was unconditionally widened to
-        all_system_symbols - dangerous, making allow_groups meaningless.
+        Regression test: whitelist must not silently widen beyond
+        the configured allow_groups.
         """
-        # Simulate kernel providing system symbols
-        fake_system = {"Sin", "Cos", "Plus", "Plot", "Solve", "Run", "Times"}
-        registry.initialize_system_symbols(fake_system)
-
         config = SecurityConfig(mode="whitelist", allow_groups=["math_core"])
         filt = registry.build_filter(config)
 
@@ -250,20 +275,3 @@ class TestCapabilityRegistry:
         # Solve is NOT in math_core — must be rejected
         with pytest.raises(SecurityError):
             filt.check("Solve[x^2 == 1, x]")
-
-    def test_whitelist_before_and_after_system_symbols_consistent(self, registry):
-        """Whitelist filter behavior must be the same before and after
-        initialize_system_symbols when all configured groups exist locally."""
-        config = SecurityConfig(mode="whitelist", allow_groups=["math_core"])
-
-        filt_before = registry.build_filter(config)
-
-        fake_system = {"Sin", "Cos", "Plot", "Run", "Integrate"}
-        registry.initialize_system_symbols(fake_system)
-        filt_after = registry.build_filter(config)
-
-        # Both should reject Plot (not in math_core)
-        with pytest.raises(SecurityError):
-            filt_before.check("Plot[Sin[Pi], {x, 0, 1}]")
-        with pytest.raises(SecurityError):
-            filt_after.check("Plot[Sin[Pi], {x, 0, 1}]")

@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import threading
 
 import anyio
 from mcp.server.fastmcp import FastMCP
@@ -46,32 +47,39 @@ class App:
         self._kernel: KernelSession | None = None
         self._ctx: ToolContext | None = None
         self._mcp: FastMCP | None = None
+        self._init_lock = threading.Lock()
 
     # ------------------------------------------------------------------
-    # Lazy-init components
+    # Lazy-init components (double-checked locking)
     # ------------------------------------------------------------------
 
     @property
     def kernel(self) -> KernelSession:
         if self._kernel is None:
-            kernel_path = find_kernel(self.config.kernel.mathkernel or None)
-            self._kernel = KernelSession(
-                kernel=kernel_path,
-                health_check_interval=self.config.kernel.health_check_interval,
-                idle_timeout=self.config.kernel.idle_timeout,
-            )
+            with self._init_lock:
+                if self._kernel is None:
+                    kernel_path = find_kernel(self.config.kernel.mathkernel or None)
+                    self._kernel = KernelSession(
+                        kernel=kernel_path,
+                        health_check_interval=self.config.kernel.health_check_interval,
+                        idle_timeout=self.config.kernel.idle_timeout,
+                    )
         return self._kernel
 
     @property
     def ctx(self) -> ToolContext:
         if self._ctx is None:
-            self._ctx = self._build_context()
+            with self._init_lock:
+                if self._ctx is None:
+                    self._ctx = self._build_context()
         return self._ctx
 
     @property
     def mcp(self) -> FastMCP:
         if self._mcp is None:
-            self._mcp = self._create_server()
+            with self._init_lock:
+                if self._mcp is None:
+                    self._mcp = self._create_server()
         return self._mcp
 
     # ------------------------------------------------------------------
@@ -139,7 +147,6 @@ class App:
             config=self.config,
             kernel=self.kernel,
             expr_filter=expr_filter,
-            registry=registry,
             role_runtimes=role_runtimes,
         )
 
@@ -291,13 +298,13 @@ def main() -> None:
     parser = _build_parser()
 
     # Default to "serve" when no subcommand is given.
-    # Detect this by checking whether argv[1] looks like a subcommand.
+    # Build a local argv copy instead of mutating the global sys.argv.
+    argv = sys.argv[1:]
     known_commands = {"serve", "init", "setup", "caddyfile", "hash-password", "add-client"}
-    if len(sys.argv) < 2 or sys.argv[1] not in known_commands:
-        # Insert "serve" so argparse treats bare flags as serve args
-        sys.argv.insert(1, "serve")
+    if not argv or argv[0] not in known_commands:
+        argv = ["serve", *argv]
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.command == "init":
         _cmd_init()
