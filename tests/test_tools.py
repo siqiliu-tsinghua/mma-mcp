@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from mma_mcp.config import AppConfig, AuthConfig, RoleConfig, UserConfig
+from mma_mcp.config import AppConfig, AuthConfig, ClientConfig, RoleConfig
 from mma_mcp.security.filter import ExpressionFilter, SecurityError
 from mma_mcp.tools import (
     RoleRuntime,
@@ -196,19 +196,19 @@ class TestApplyRolePolicy:
     def test_anonymous_user_returns_none(self):
         """Anonymous user (no role) uses global filter."""
         ctx = self._setup_rbac_ctx()
-        from mma_mcp.auth import ANONYMOUS, current_user
-        tok = current_user.set(ANONYMOUS)
+        from mma_mcp.auth import ANONYMOUS, current_client
+        tok = current_client.set(ANONYMOUS)
         try:
             result = _apply_role_policy(ctx, "evaluate")
             assert result is None
         finally:
-            current_user.reset(tok)
+            current_client.reset(tok)
 
     def test_admin_gets_permissive_filter(self):
         """Admin with security='none' gets an empty blacklist filter."""
         ctx = self._setup_rbac_ctx()
-        from mma_mcp.auth import UserIdentity, current_user
-        tok = current_user.set(UserIdentity(username="alice", role="admin"))
+        from mma_mcp.auth import ClientIdentity, current_client
+        tok = current_client.set(ClientIdentity(client_id="alice", role="admin"))
         try:
             filt_tok = _apply_role_policy(ctx, "evaluate")
             assert filt_tok is not None
@@ -218,15 +218,15 @@ class TestApplyRolePolicy:
             # Empty blacklist = everything allowed
             active.check("Run[\"ls\"]")
         finally:
-            current_user.reset(tok)
+            current_client.reset(tok)
             if filt_tok is not None:
                 _active_filter.reset(filt_tok)
 
     def test_reader_gets_restrictive_filter(self):
         """Reader gets the role-specific whitelist filter."""
         ctx = self._setup_rbac_ctx()
-        from mma_mcp.auth import UserIdentity, current_user
-        tok = current_user.set(UserIdentity(username="bob", role="reader"))
+        from mma_mcp.auth import ClientIdentity, current_client
+        tok = current_client.set(ClientIdentity(client_id="bob", role="reader"))
         try:
             filt_tok = _apply_role_policy(ctx, "evaluate")
             assert filt_tok is not None
@@ -236,33 +236,33 @@ class TestApplyRolePolicy:
             with pytest.raises(SecurityError):
                 active.check("Run[\"ls\"]")
         finally:
-            current_user.reset(tok)
+            current_client.reset(tok)
             if filt_tok is not None:
                 _active_filter.reset(filt_tok)
 
     def test_tool_not_allowed_raises(self):
         """Accessing a tool not in allowed_tools raises _AccessDenied."""
         ctx = self._setup_rbac_ctx()
-        from mma_mcp.auth import UserIdentity, current_user
+        from mma_mcp.auth import ClientIdentity, current_client
         from mma_mcp.tools import _AccessDenied
-        tok = current_user.set(UserIdentity(username="bob", role="reader"))
+        tok = current_client.set(ClientIdentity(client_id="bob", role="reader"))
         try:
             with pytest.raises(_AccessDenied):
                 _apply_role_policy(ctx, "evaluate_image")  # reader can't use evaluate_image
         finally:
-            current_user.reset(tok)
+            current_client.reset(tok)
 
     def test_unknown_role_raises(self):
         """Unknown role raises _AccessDenied."""
         ctx = self._setup_rbac_ctx()
-        from mma_mcp.auth import UserIdentity, current_user
+        from mma_mcp.auth import ClientIdentity, current_client
         from mma_mcp.tools import _AccessDenied
-        tok = current_user.set(UserIdentity(username="eve", role="hacker"))
+        tok = current_client.set(ClientIdentity(client_id="eve", role="hacker"))
         try:
             with pytest.raises(_AccessDenied):
                 _apply_role_policy(ctx, "evaluate")
         finally:
-            current_user.reset(tok)
+            current_client.reset(tok)
 
 
 # ===================================================================
@@ -308,13 +308,13 @@ class TestSessionIsolation:
     def test_session_context_with_user(self):
         """Authenticated user gets a WL context string."""
         ctx = _make_ctx()
-        from mma_mcp.auth import UserIdentity, current_user
-        tok = current_user.set(UserIdentity(username="alice", role="admin"))
+        from mma_mcp.auth import ClientIdentity, current_client
+        tok = current_client.set(ClientIdentity(client_id="alice", role="admin"))
         try:
             sc = ctx.session_context
             assert sc == "MCP$alice`"
         finally:
-            current_user.reset(tok)
+            current_client.reset(tok)
 
     def test_session_context_anonymous(self):
         """Anonymous user gets empty string (no isolation)."""
@@ -330,12 +330,12 @@ class TestSessionIsolation:
         ctx = ToolContext(config=config, kernel=kernel, expr_filter=expr_filter)
         ctx._kernel_ready = True
 
-        from mma_mcp.auth import UserIdentity, current_user
-        tok = current_user.set(UserIdentity(username="alice", role="admin"))
+        from mma_mcp.auth import ClientIdentity, current_client
+        tok = current_client.set(ClientIdentity(client_id="alice", role="admin"))
         try:
             assert ctx.session_context == ""
         finally:
-            current_user.reset(tok)
+            current_client.reset(tok)
 
     def test_sanitize_context_name(self):
         from mma_mcp.kernel import sanitize_context_name
@@ -382,42 +382,42 @@ class TestRoleResourceLimits:
     def test_role_overrides_timeout(self):
         """Role with timeout > 0 overrides global."""
         ctx = self._make_ctx_with_limits()
-        from mma_mcp.auth import UserIdentity, current_user
-        tok = current_user.set(UserIdentity(username="alice", role="admin"))
+        from mma_mcp.auth import ClientIdentity, current_client
+        tok = current_client.set(ClientIdentity(client_id="alice", role="admin"))
         try:
             assert ctx.timeout == 10
             assert ctx.hard_timeout == 20
             assert ctx.max_result_size == 1024
         finally:
-            current_user.reset(tok)
+            current_client.reset(tok)
 
     def test_role_inherits_global_when_zero(self):
         """Role with limit=0 falls back to global config."""
         ctx = self._make_ctx_with_limits()
-        from mma_mcp.auth import UserIdentity, current_user
-        tok = current_user.set(UserIdentity(username="bob", role="reader"))
+        from mma_mcp.auth import ClientIdentity, current_client
+        tok = current_client.set(ClientIdentity(client_id="bob", role="reader"))
         try:
             assert ctx.timeout == ctx.config.kernel.timeout
             assert ctx.hard_timeout == ctx.config.kernel.hard_timeout
             assert ctx.max_result_size == ctx.config.kernel.max_result_size
         finally:
-            current_user.reset(tok)
+            current_client.reset(tok)
 
     def test_anonymous_uses_global(self):
         """Anonymous user always gets global limits."""
         ctx = self._make_ctx_with_limits()
-        # No current_user set → anonymous
+        # No current_client set → anonymous
         assert ctx.timeout == ctx.config.kernel.timeout
 
     def test_truncate_uses_role_limit(self):
         """truncate() respects role-specific max_result_size."""
         ctx = self._make_ctx_with_limits()
-        from mma_mcp.auth import UserIdentity, current_user
-        tok = current_user.set(UserIdentity(username="alice", role="admin"))
+        from mma_mcp.auth import ClientIdentity, current_client
+        tok = current_client.set(ClientIdentity(client_id="alice", role="admin"))
         try:
             big = "x" * 2000
             result = ctx.truncate(big)
             assert len(result) < 2000
             assert "[Truncated" in result
         finally:
-            current_user.reset(tok)
+            current_client.reset(tok)

@@ -1,4 +1,4 @@
-"""Generate Caddyfile for mma-mcp reverse proxy with automatic HTTPS.
+"""Generate Caddyfile for mma-mcp HTTPS with automatic TLS.
 
 Supports two ACME modes:
   - DNS-01 challenge via provider plugin (no port 80 needed)

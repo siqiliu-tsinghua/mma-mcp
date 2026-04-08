@@ -2,19 +2,36 @@
 
 A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that wraps a local **Wolfram Engine**, enabling AI assistants (Claude, ChatGPT, etc.) to perform symbolic math, numerical analysis, and data visualization via Wolfram Language.
 
+> **Disclaimer:** This is an **unofficial**, independent, personal project.
+> It is **not** affiliated with, sponsored by, endorsed by, or certified by
+> Wolfram Research, Inc.  "Wolfram", "Wolfram Language", "Wolfram Engine",
+> "Mathematica", and related marks are trademarks of Wolfram Research.
+>
+> This software does **not** include any Wolfram Engine / Mathematica binaries,
+> activation keys, license files, or other proprietary materials.  Users must
+> independently obtain and properly license their own copy of the Wolfram
+> Engine or Mathematica in accordance with
+> [Wolfram's licensing terms](https://www.wolfram.com/legal/).
+>
+> The sole purpose of this project is to allow a **licensed individual** to
+> invoke their own, locally-installed Wolfram kernel through AI assistants
+> on their own machine, within the scope permitted by their license.
+> **Redistribution of Wolfram Engine access to third parties is not an
+> intended use case and may violate Wolfram's licensing terms.**
+
 ## Features
 
-- **MCP Tools**: `evaluate`, `evaluate_image`, `solve`, `simplify`, `integrate`, `differentiate`, `plot`, `data_query`, `query`
-- **Transports**: stdio (local) and Streamable HTTP (remote)
-- **Security**: Pre-kernel expression filtering with blacklist/whitelist modes and 20 capability groups
-- **Multi-user RBAC**: Per-user credentials, per-role tool and security policy control
-- **OAuth 2.1**: Authorization server for web MCP clients (Claude.ai, ChatGPT)
+- **MCP Tools**: `evaluate` (text) and `evaluate_image` (PNG) — all Wolfram Language capabilities through two universal tools
+- **Transports**: stdio (local) and Streamable HTTP
+- **Security**: Pre-kernel expression filtering with blacklist/whitelist modes and 28 capability groups
+- **Client RBAC**: Per-client credentials, per-role tool and security policy control — for isolating different AI clients on the same machine
+- **OAuth 2.1**: Authorization server for web-based MCP clients (Claude.ai, ChatGPT)
 - **Config-driven**: Single TOML file controls all behavior
 
 ## Prerequisites
 
 - Python 3.11+
-- [Wolfram Engine](https://www.wolfram.com/engine/) (free for non-commercial use)
+- [Wolfram Engine](https://www.wolfram.com/engine/) or Mathematica (properly licensed)
 - [uv](https://docs.astral.sh/uv/) package manager
 
 ## Quick Start
@@ -27,6 +44,9 @@ uv sync
 
 # Generate default config
 uv run mma-mcp init
+
+# Generate security group files (requires Wolfram kernel, ~1 min)
+uv run mma-mcp setup
 
 # Start server (stdio, for local MCP clients)
 uv run mma-mcp serve
@@ -49,22 +69,10 @@ Add to your `.mcp.json`:
 }
 ```
 
-### Remote Clients (HTTP)
+### HTTP Transport
 
 ```bash
 uv run mma-mcp serve --transport http --host 127.0.0.1 --port 8000
-```
-
-Then configure your MCP client with:
-
-```json
-{
-  "mcpServers": {
-    "mma-mcp": {
-      "url": "https://mma-mcp.yourdomain.com/mcp"
-    }
-  }
-}
 ```
 
 ## Configuration
@@ -84,7 +92,7 @@ Key sections:
 | `[security]` | Blacklist/whitelist mode, capability groups |
 | `[tools]` | Which MCP tools to expose |
 | `[tls]` | Domain and DNS provider for HTTPS (Caddy) |
-| `[auth]` | Multi-user roles and credentials |
+| `[auth]` | Client identity and role-based access control |
 
 ## Security
 
@@ -94,47 +102,28 @@ Expressions are filtered **before** reaching the Wolfram kernel. Symbols are ext
 
 **Whitelist mode**: only allows symbols from explicitly enabled groups.
 
-20 pre-built capability groups (14 safe + 6 dangerous) cover ~2000 Wolfram Language symbols. Regenerate from your local kernel:
+28 capability groups (22 safe + 6 dangerous) cover ~6000 Wolfram Language symbols. Regenerate from your local kernel:
 
 ```bash
-uv run mma-mcp setup
+uv run mma-mcp setup          # skip if groups already exist
+uv run mma-mcp setup --force   # force regeneration
 ```
 
-## Multi-User Authentication
+## Client Identity & Roles
 
-For public-facing deployments, enable per-user auth with role-based access control:
+When using HTTP transport, you can configure per-client credentials and roles to isolate different AI clients (e.g., Claude and ChatGPT) connecting to the same kernel:
 
 ```bash
 # Generate password hash
 uv run mma-mcp hash-password
 
-# Generate TOML snippet for a new user
-uv run mma-mcp add-user alice --role admin
+# Generate TOML snippet for a new client
+uv run mma-mcp add-client claude --role admin
 ```
+
+Each client is bound to a role that controls which tools it can access, which Wolfram symbols it can use, and resource limits (timeout, result size).  Variables are isolated per client via WL context namespacing.
 
 See the `[auth]` section in `mma_mcp.toml` for configuration details.
-
-## Deployment
-
-### With Caddy (HTTPS)
-
-```bash
-# Generate Caddyfile from config
-uv run mma-mcp caddyfile
-
-# Build Caddy with DNS plugin (e.g., for Alibaba Cloud DNS)
-xcaddy build --with github.com/caddy-dns/alidns
-```
-
-### With systemd
-
-Copy `mma-mcp.service` to `/etc/systemd/system/` and adjust paths:
-
-```bash
-sudo cp mma-mcp.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now mma-mcp
-```
 
 ## Development
 
@@ -152,11 +141,12 @@ uv run mcp dev src/mma_mcp/server.py
 |---------|-------------|
 | `mma-mcp serve` | Start the MCP server (default) |
 | `mma-mcp init` | Generate default `mma_mcp.toml` |
-| `mma-mcp setup` | Regenerate security group JSONs from local kernel |
-| `mma-mcp caddyfile` | Generate Caddyfile for reverse proxy + HTTPS |
+| `mma-mcp setup` | Generate security group JSONs from local kernel |
+| `mma-mcp caddyfile` | Generate Caddyfile for HTTPS |
 | `mma-mcp hash-password` | Hash a password for config |
-| `mma-mcp add-user` | Generate TOML snippet for a new user |
+| `mma-mcp add-client` | Generate TOML snippet for a new AI client |
 
 ## License
 
-MIT
+MIT — applies only to the code in this repository.  Use of Wolfram Engine /
+Mathematica is governed by Wolfram Research's own license terms.

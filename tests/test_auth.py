@@ -6,8 +6,8 @@ import base64
 
 import pytest
 
-from mma_mcp.auth import ANONYMOUS, BearerAuthMiddleware, UserIdentity, current_user
-from mma_mcp.config import AuthConfig, RoleConfig, UserConfig
+from mma_mcp.auth import ANONYMOUS, BearerAuthMiddleware, ClientIdentity, current_client
+from mma_mcp.config import AuthConfig, ClientConfig, RoleConfig
 from mma_mcp.oauth import OAuthServer, _verify_pkce
 from mma_mcp.passwords import hash_password, verify_password
 
@@ -79,20 +79,20 @@ class TestOAuthServerLegacy:
         assert srv.validate_token("my-secret")
         assert not srv.validate_token("wrong")
 
-    def test_get_token_user_returns_none_legacy(self):
+    def test_get_token_client_returns_none_legacy(self):
         srv = OAuthServer(password="my-secret")
-        assert srv.get_token_user("anything") is None
+        assert srv.get_token_client("anything") is None
 
-    def test_multi_user_is_false(self):
+    def test_multi_client_is_false(self):
         srv = OAuthServer(password="my-secret")
-        assert not srv.multi_user
+        assert not srv.multi_client
 
 
 # ===================================================================
-# OAuthServer — multi-user mode
+# OAuthServer — multi-client mode
 # ===================================================================
 
-class TestOAuthServerMultiUser:
+class TestOAuthServerMultiClient:
 
     @pytest.fixture
     def auth_config(self):
@@ -100,15 +100,15 @@ class TestOAuthServerMultiUser:
         return AuthConfig(
             enabled=True,
             roles={"admin": RoleConfig(tools="*", security="none")},
-            users={"alice": UserConfig(role="admin", password_hash=pwd_hash)},
+            clients={"alice": ClientConfig(role="admin", password_hash=pwd_hash)},
         )
 
     @pytest.fixture
     def srv(self, auth_config):
         return OAuthServer(auth_config=auth_config)
 
-    def test_multi_user_is_true(self, srv):
-        assert srv.multi_user
+    def test_multi_client_is_true(self, srv):
+        assert srv.multi_client
 
     def test_routes_exist(self, srv):
         routes = srv.routes()
@@ -131,18 +131,18 @@ class TestBearerAuthResolve:
         return AuthConfig(
             enabled=True,
             roles={"reader": RoleConfig()},
-            users={"bob": UserConfig(role="reader", password_hash=pwd_hash)},
+            clients={"bob": ClientConfig(role="reader", password_hash=pwd_hash)},
         )
 
     def test_basic_token_valid(self, auth_config):
-        """base64(username:password) resolves to correct identity."""
+        """base64(client_id:password) resolves to correct identity."""
         middleware = BearerAuthMiddleware(
             app=None, auth_config=auth_config,
         )
         token = base64.b64encode(b"bob:bob-pass").decode()
         identity = middleware._resolve(token)
         assert identity is not None
-        assert identity.username == "bob"
+        assert identity.client_id == "bob"
         assert identity.role == "reader"
 
     def test_basic_token_wrong_password(self, auth_config):
@@ -153,7 +153,7 @@ class TestBearerAuthResolve:
         identity = middleware._resolve(token)
         assert identity is None
 
-    def test_basic_token_unknown_user(self, auth_config):
+    def test_basic_token_unknown_client(self, auth_config):
         middleware = BearerAuthMiddleware(
             app=None, auth_config=auth_config,
         )
@@ -185,18 +185,18 @@ class TestBearerAuthResolve:
 
 
 # ===================================================================
-# UserIdentity
+# ClientIdentity
 # ===================================================================
 
-class TestUserIdentity:
+class TestClientIdentity:
 
     def test_frozen(self):
-        u = UserIdentity(username="alice", role="admin")
+        c = ClientIdentity(client_id="claude", role="admin")
         with pytest.raises(AttributeError):
-            u.username = "bob"  # type: ignore[misc]
+            c.client_id = "chatgpt"  # type: ignore[misc]
 
     def test_anonymous_default(self):
-        assert ANONYMOUS.username == ""
+        assert ANONYMOUS.client_id == ""
         assert ANONYMOUS.role == ""
 
 
@@ -213,7 +213,7 @@ class TestOAuthClientValidation:
         config = AuthConfig(
             enabled=True,
             roles={"admin": RoleConfig(tools="*", security="none")},
-            users={"alice": UserConfig(role="admin", password_hash=pwd_hash)},
+            clients={"alice": ClientConfig(role="admin", password_hash=pwd_hash)},
         )
         return OAuthServer(auth_config=config)
 

@@ -121,7 +121,7 @@ class RoleConfig:
 
 
 @dataclass
-class UserConfig:
+class ClientConfig:
     role: str = ""
     password_hash: str = ""                 # format: scrypt:<salt_hex>:<hash_hex>
 
@@ -130,7 +130,7 @@ class UserConfig:
 class AuthConfig:
     enabled: bool = False
     roles: dict[str, RoleConfig] = field(default_factory=dict)
-    users: dict[str, UserConfig] = field(default_factory=dict)
+    clients: dict[str, ClientConfig] = field(default_factory=dict)
 
 
 @dataclass
@@ -255,18 +255,18 @@ def _build_auth_config(raw: dict[str, Any]) -> AuthConfig:
             max_result_size=rdata.get("max_result_size", 0),
         )
 
-    # Parse users
-    users: dict[str, UserConfig] = {}
-    raw_users = sec.get("users", {})
-    for name, udata in raw_users.items():
-        if not isinstance(udata, dict):
+    # Parse clients
+    clients: dict[str, ClientConfig] = {}
+    raw_clients = sec.get("clients", {})
+    for name, cdata in raw_clients.items():
+        if not isinstance(cdata, dict):
             continue
-        users[name] = UserConfig(
-            role=udata.get("role", ""),
-            password_hash=udata.get("password_hash", ""),
+        clients[name] = ClientConfig(
+            role=cdata.get("role", ""),
+            password_hash=cdata.get("password_hash", ""),
         )
 
-    return AuthConfig(enabled=True, roles=roles, users=users)
+    return AuthConfig(enabled=True, roles=roles, clients=clients)
 
 
 class ConfigError(ValueError):
@@ -335,24 +335,24 @@ def _validate(config: AppConfig) -> None:
 
     # auth
     if config.auth.enabled:
-        if not config.auth.users:
-            errors.append("auth.enabled is true but no users are defined")
+        if not config.auth.clients:
+            errors.append("auth.enabled is true but no clients are defined")
         if not config.auth.roles:
             errors.append("auth.enabled is true but no roles are defined")
         role_names = set(config.auth.roles)
-        for uname, uconf in config.auth.users.items():
-            if not uconf.role:
-                errors.append(f"auth.users.{uname}: role is required")
-            elif uconf.role not in role_names:
+        for cname, cconf in config.auth.clients.items():
+            if not cconf.role:
+                errors.append(f"auth.clients.{cname}: role is required")
+            elif cconf.role not in role_names:
                 errors.append(
-                    f"auth.users.{uname}: role {uconf.role!r} not defined "
+                    f"auth.clients.{cname}: role {cconf.role!r} not defined "
                     f"(available: {sorted(role_names)})"
                 )
-            if not uconf.password_hash:
-                errors.append(f"auth.users.{uname}: password_hash is required")
-            elif not uconf.password_hash.startswith("scrypt:") or uconf.password_hash.count(":") != 2:
+            if not cconf.password_hash:
+                errors.append(f"auth.clients.{cname}: password_hash is required")
+            elif not cconf.password_hash.startswith("scrypt:") or cconf.password_hash.count(":") != 2:
                 errors.append(
-                    f"auth.users.{uname}: password_hash must be "
+                    f"auth.clients.{cname}: password_hash must be "
                     f"'scrypt:<salt_hex>:<hash_hex>'"
                 )
         valid_sec_modes = {"", "none", "blacklist", "whitelist"}
@@ -427,9 +427,9 @@ hard_timeout = 60
 # MCP responses. 0 = no limit.
 max_result_size = 65536
 
-# Session isolation: each authenticated user gets a separate WL context
-# namespace, so variables defined by one user are invisible to others.
-# Has no effect in single-user (stdio / no auth) mode.
+# Session isolation: each authenticated AI client gets a separate WL context
+# namespace, so variables defined by one client are invisible to others.
+# Has no effect in single-client (stdio / no auth) mode.
 session_isolation = true
 
 # Default output format: TeXForm, OutputForm, InputForm, etc.
@@ -448,7 +448,7 @@ idle_timeout = 0
 # ─── Server Transport ────────────────────────────────────────────────────────
 
 [server]
-# Transport mode: "stdio" (local MCP clients) or "http" (remote clients via HTTPS)
+# Transport mode: "stdio" (local MCP clients) or "http" (HTTP MCP clients)
 transport = "stdio"
 
 # HTTP listen address (only used when transport = "http")
@@ -469,7 +469,7 @@ port = 8000
 [tls]
 enabled = false
 
-# Your public domain, e.g. "mma-mcp.example.com"
+# Your domain for HTTPS, e.g. "mma-mcp.example.com"
 domain = ""
 
 # DNS provider for DNS-01 ACME challenge (no need to open port 80).
@@ -544,8 +544,9 @@ enabled = [
 ]
 
 # ─── Authentication & Roles ─────────────────────────────────────────────────
-# Multi-user auth with role-based access control.
-# Enable this section for public-facing HTTP deployments.
+# Client identity and role-based access control for AI client isolation.
+# Each AI client (e.g. Claude, ChatGPT) connects with its own credentials
+# and is bound to a role that controls tool access and resource limits.
 # Generate password hashes with: mma-mcp hash-password
 
 # [auth]
@@ -567,11 +568,11 @@ enabled = [
 # hard_timeout = 30
 # max_result_size = 16384
 #
-# [auth.users.alice]
+# [auth.clients.claude]
 # role = "admin"
 # password_hash = "scrypt:<salt_hex>:<hash_hex>"
 #
-# [auth.users.bob]
+# [auth.clients.chatgpt]
 # role = "analyst"
 # password_hash = "scrypt:<salt_hex>:<hash_hex>"
 """

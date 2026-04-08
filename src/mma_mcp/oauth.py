@@ -7,9 +7,10 @@ Implements just enough of the spec for ChatGPT and Claude web to connect:
   - Authorization Code grant
 
 Supports two modes:
-  - **Multi-user** (``auth_config`` provided): login page shows username + password,
-    tokens carry user identity.
-  - **Legacy single-password** (``password`` provided): login page shows password only.
+  - **Multi-client** (``auth_config`` provided): login page shows client_id +
+    password, tokens carry client identity and role.
+  - **Legacy single-password** (``password`` provided): login page shows
+    password only.
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.routing import Route
 
 if TYPE_CHECKING:
-    from mma_mcp.auth import UserIdentity
+    from mma_mcp.auth import ClientIdentity
     from mma_mcp.config import AuthConfig
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,7 @@ class _AuthCode:
     redirect_uri: str
     code_challenge: str
     expires_at: float
-    username: str = ""
+    client_name: str = ""
     role: str = ""
 
 
@@ -52,7 +53,7 @@ class _AuthCode:
 class _TokenInfo:
     client_id: str
     expires_at: float
-    username: str = ""
+    client_name: str = ""
     role: str = ""
 
 
@@ -65,8 +66,8 @@ class _ClientInfo:
 class OAuthServer:
     """Minimal OAuth 2.1 authorization server.
 
-    In multi-user mode (``auth_config`` provided), the login page shows
-    username + password and tokens carry user identity.  In legacy mode
+    In multi-client mode (``auth_config`` provided), the login page shows
+    client_id + password and tokens carry client identity.  In legacy mode
     (``password`` provided), it behaves as before: single password, no identity.
     """
 
@@ -77,15 +78,15 @@ class OAuthServer:
     ) -> None:
         self._password = password
         self._auth_config = auth_config
-        self._multi_user = auth_config is not None and auth_config.enabled
+        self._multi_client = auth_config is not None and auth_config.enabled
         # In-memory stores (single process, no persistence needed)
         self._clients: dict[str, _ClientInfo] = {}
         self._auth_codes: dict[str, _AuthCode] = {}
         self._access_tokens: dict[str, _TokenInfo] = {}
 
     @property
-    def multi_user(self) -> bool:
-        return self._multi_user
+    def multi_client(self) -> bool:
+        return self._multi_client
 
     # ------------------------------------------------------------------
     # Token validation (called by auth middleware)
@@ -102,9 +103,9 @@ class OAuthServer:
             del self._access_tokens[token]
         return False
 
-    def get_token_user(self, token: str) -> "UserIdentity | None":
-        """Return the UserIdentity for an OAuth-issued token, or None."""
-        from mma_mcp.auth import UserIdentity
+    def get_token_client(self, token: str) -> "ClientIdentity | None":
+        """Return the ClientIdentity for an OAuth-issued token, or None."""
+        from mma_mcp.auth import ClientIdentity
 
         info = self._access_tokens.get(token)
         if info is None:
@@ -112,9 +113,9 @@ class OAuthServer:
         if time.time() >= info.expires_at:
             del self._access_tokens[token]
             return None
-        if not info.username:
+        if not info.client_name:
             return None
-        return UserIdentity(username=info.username, role=info.role)
+        return ClientIdentity(client_id=info.client_name, role=info.role)
 
     # ------------------------------------------------------------------
     # Starlette routes
@@ -198,7 +199,7 @@ class OAuthServer:
         state = str(form.get("state", ""))
 
         # Authenticate
-        username, role, err = self._check_credentials(form)
+        client_name, role, err = self._check_credentials(form)
         if err:
             hidden = self._build_hidden_fields(form)
             return HTMLResponse(
@@ -234,10 +235,10 @@ class OAuthServer:
             redirect_uri=redirect_uri,
             code_challenge=code_challenge,
             expires_at=time.time() + _CODE_TTL,
-            username=username,
+            client_name=client_name,
             role=role,
         )
-        logger.info("Issued auth code for user=%s role=%s client=%s", username, role, client_id)
+        logger.info("Issued auth code for client=%s role=%s oauth_client=%s", client_name, role, client_id)
 
         # Redirect back
         sep = "&" if "?" in redirect_uri else "?"
@@ -298,12 +299,12 @@ class OAuthServer:
         self._access_tokens[access_token] = _TokenInfo(
             client_id=client_id,
             expires_at=time.time() + _TOKEN_TTL,
-            username=auth_code.username,
+            client_name=auth_code.client_name,
             role=auth_code.role,
         )
         logger.info(
-            "Issued access token for user=%s role=%s client=%s",
-            auth_code.username, auth_code.role, client_id,
+            "Issued access token for client=%s role=%s oauth_client=%s",
+            auth_code.client_name, auth_code.role, client_id,
         )
 
         return JSONResponse({
@@ -319,23 +320,23 @@ class OAuthServer:
     def _check_credentials(self, form) -> tuple[str, str, str]:  # noqa: ANN001
         """Validate the submitted form credentials.
 
-        Returns ``(username, role, error_message)``.  *error_message* is empty
-        on success.
+        Returns ``(client_name, role, error_message)``.  *error_message* is
+        empty on success.
         """
         password = str(form.get("password", ""))
 
-        if self._multi_user:
-            username = str(form.get("username", ""))
-            if not username:
-                return "", "", "Username is required"
+        if self._multi_client:
+            client_name = str(form.get("username", ""))  # HTML form field name
+            if not client_name:
+                return "", "", "Client ID is required"
             assert self._auth_config is not None
-            user_conf = self._auth_config.users.get(username)
-            if user_conf is None:
-                return "", "", "Invalid username or password"
+            client_conf = self._auth_config.clients.get(client_name)
+            if client_conf is None:
+                return "", "", "Invalid client ID or password"
             from mma_mcp.passwords import verify_password
-            if not verify_password(password, user_conf.password_hash):
-                return "", "", "Invalid username or password"
-            return username, user_conf.role, ""
+            if not verify_password(password, client_conf.password_hash):
+                return "", "", "Invalid client ID or password"
+            return client_name, client_conf.role, ""
         else:
             # Legacy single-password mode
             if not hmac.compare_digest(password, self._password):
@@ -352,9 +353,9 @@ class OAuthServer:
             f'<p style="color:#e74c3c;margin-bottom:16px">{_esc(error)}</p>'
             if error else ""
         )
-        if self._multi_user:
+        if self._multi_client:
             username_field = (
-                '<label for="username">Username</label>\n'
+                '<label for="username">Client ID</label>\n'
                 '<input type="text" id="username" name="username" '
                 'autocomplete="username" autofocus required '
                 'style="width:100%;padding:10px 12px;border:1px solid #ddd;'

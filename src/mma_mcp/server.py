@@ -179,8 +179,8 @@ class App:
                 auth_config=self.config.auth,
             )
             logger.info(
-                "Multi-user auth enabled (%d users, %d roles)",
-                len(self.config.auth.users), len(self.config.auth.roles),
+                "Client auth enabled (%d clients, %d roles)",
+                len(self.config.auth.clients), len(self.config.auth.roles),
             )
             return
 
@@ -270,17 +270,17 @@ def _build_parser() -> "argparse.ArgumentParser":
                          help="Force regeneration of security groups even if they exist")
 
     # --- caddyfile ---
-    sub.add_parser("caddyfile", help="Generate a Caddyfile for reverse proxy + HTTPS")
+    sub.add_parser("caddyfile", help="Generate a Caddyfile for HTTPS")
 
     # --- hash-password ---
     sub.add_parser("hash-password", help="Hash a password for use in config")
 
-    # --- add-user ---
-    add_user = sub.add_parser(
-        "add-user", help="Generate a TOML user entry (paste into mma_mcp.toml)",
+    # --- add-client ---
+    add_client = sub.add_parser(
+        "add-client", help="Generate a TOML client entry (paste into mma_mcp.toml)",
     )
-    add_user.add_argument("username", nargs="?", help="Username")
-    add_user.add_argument("--role", required=True, help="Role name")
+    add_client.add_argument("client_id", nargs="?", help="Client identifier (e.g. claude, chatgpt)")
+    add_client.add_argument("--role", required=True, help="Role name")
 
     return parser
 
@@ -292,7 +292,7 @@ def main() -> None:
 
     # Default to "serve" when no subcommand is given.
     # Detect this by checking whether argv[1] looks like a subcommand.
-    known_commands = {"serve", "init", "setup", "caddyfile", "hash-password", "add-user"}
+    known_commands = {"serve", "init", "setup", "caddyfile", "hash-password", "add-client"}
     if len(sys.argv) < 2 or sys.argv[1] not in known_commands:
         # Insert "serve" so argparse treats bare flags as serve args
         sys.argv.insert(1, "serve")
@@ -307,8 +307,8 @@ def main() -> None:
         _cmd_caddyfile()
     elif args.command == "hash-password":
         _cmd_hash_password()
-    elif args.command == "add-user":
-        _cmd_add_user(args)
+    elif args.command == "add-client":
+        _cmd_add_client(args)
     else:
         _cmd_serve(args)
 
@@ -381,16 +381,16 @@ def _cmd_hash_password() -> None:
     print(hash_password(pwd))
 
 
-def _cmd_add_user(args) -> None:  # noqa: ANN001
-    """Generate a TOML snippet for adding a user."""
+def _cmd_add_client(args) -> None:  # noqa: ANN001
+    """Generate a TOML snippet for adding an AI client."""
     import getpass
     from mma_mcp.passwords import hash_password
 
-    username = args.username
-    if not username:
-        username = input("Username: ")
-    if not username:
-        print("Error: username is required", file=sys.stderr)
+    client_id = args.client_id
+    if not client_id:
+        client_id = input("Client ID (e.g. claude, chatgpt): ")
+    if not client_id:
+        print("Error: client_id is required", file=sys.stderr)
         sys.exit(1)
 
     pwd = getpass.getpass("Password: ")
@@ -401,7 +401,7 @@ def _cmd_add_user(args) -> None:  # noqa: ANN001
 
     h = hash_password(pwd)
     print(f"\n# Add this to your mma_mcp.toml:\n")
-    print(f"[auth.users.{username}]")
+    print(f"[auth.clients.{client_id}]")
     print(f'role = "{args.role}"')
     print(f'password_hash = "{h}"')
 

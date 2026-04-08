@@ -17,7 +17,7 @@ from mma_mcp.config import (
     ServerConfig,
     ToolsConfig,
     TlsConfig,
-    UserConfig,
+    ClientConfig,
     _build_auth_config,
     _build_kernel_config,
     _build_security_config,
@@ -64,7 +64,7 @@ class TestDefaults:
         a = AuthConfig()
         assert not a.enabled
         assert a.roles == {}
-        assert a.users == {}
+        assert a.clients == {}
 
     def test_app_config_defaults(self):
         c = AppConfig()
@@ -124,7 +124,7 @@ class TestConfigBuilders:
                     "admin": {"tools": "*", "security": "none"},
                     "reader": {"tools": ["evaluate"]},
                 },
-                "users": {
+                "clients": {
                     "alice": {"role": "admin", "password_hash": "scrypt:aa:bb"},
                 },
             }
@@ -136,8 +136,8 @@ class TestConfigBuilders:
         assert a.roles["admin"].security == "none"
         assert "reader" in a.roles
         assert a.roles["reader"].tools == ["evaluate"]
-        assert "alice" in a.users
-        assert a.users["alice"].role == "admin"
+        assert "alice" in a.clients
+        assert a.clients["alice"].role == "admin"
 
 
 # ===================================================================
@@ -185,20 +185,20 @@ class TestValidation:
         with pytest.raises(ConfigError, match="dns_provider"):
             _validate(c)
 
-    def test_auth_enabled_no_users(self):
+    def test_auth_enabled_no_clients(self):
         c = AppConfig(auth=AuthConfig(
             enabled=True,
             roles={"admin": RoleConfig()},
-            users={},
+            clients={},
         ))
-        with pytest.raises(ConfigError, match="no users"):
+        with pytest.raises(ConfigError, match="no clients"):
             _validate(c)
 
     def test_auth_enabled_no_roles(self):
         c = AppConfig(auth=AuthConfig(
             enabled=True,
             roles={},
-            users={"alice": UserConfig(role="admin", password_hash="scrypt:aa:bb")},
+            clients={"alice": ClientConfig(role="admin", password_hash="scrypt:aa:bb")},
         ))
         with pytest.raises(ConfigError, match="no roles"):
             _validate(c)
@@ -207,7 +207,7 @@ class TestValidation:
         c = AppConfig(auth=AuthConfig(
             enabled=True,
             roles={"admin": RoleConfig()},
-            users={"alice": UserConfig(role="nonexistent", password_hash="scrypt:aa:bb")},
+            clients={"alice": ClientConfig(role="nonexistent", password_hash="scrypt:aa:bb")},
         ))
         with pytest.raises(ConfigError, match="nonexistent"):
             _validate(c)
@@ -216,7 +216,7 @@ class TestValidation:
         c = AppConfig(auth=AuthConfig(
             enabled=True,
             roles={"admin": RoleConfig()},
-            users={"alice": UserConfig(role="admin", password_hash="plain:bad")},
+            clients={"alice": ClientConfig(role="admin", password_hash="plain:bad")},
         ))
         with pytest.raises(ConfigError, match="password_hash"):
             _validate(c)
@@ -225,7 +225,7 @@ class TestValidation:
         c = AppConfig(auth=AuthConfig(
             enabled=True,
             roles={"admin": RoleConfig(security="custom")},
-            users={"alice": UserConfig(role="admin", password_hash="scrypt:aa:bb")},
+            clients={"alice": ClientConfig(role="admin", password_hash="scrypt:aa:bb")},
         ))
         with pytest.raises(ConfigError, match="security"):
             _validate(c)

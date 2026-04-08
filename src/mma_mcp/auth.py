@@ -1,9 +1,9 @@
 """Bearer token authentication middleware for Streamable HTTP transport.
 
 Supports three modes (auto-selected based on configuration):
-  1. Multi-user + roles: ``[auth]`` enabled — users authenticate via OAuth or
-     ``base64(username:password)`` Bearer tokens. Identity is propagated via
-     ``current_user`` contextvar.
+  1. Multi-client + roles: ``[auth]`` enabled — AI clients authenticate via
+     OAuth or ``base64(client_id:password)`` Bearer tokens.  Identity is
+     propagated via ``current_client`` contextvar.
   2. Legacy single-token: ``server.auth_token_env`` set — static Bearer token.
   3. No auth: neither configured — middleware not mounted.
 
@@ -31,19 +31,19 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# User identity (propagated via contextvars)
+# Client identity (propagated via contextvars)
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
-class UserIdentity:
-    username: str
+class ClientIdentity:
+    client_id: str
     role: str
 
 
-ANONYMOUS = UserIdentity(username="", role="")
+ANONYMOUS = ClientIdentity(client_id="", role="")
 
-current_user: contextvars.ContextVar[UserIdentity] = contextvars.ContextVar(
-    "current_user", default=ANONYMOUS,
+current_client: contextvars.ContextVar[ClientIdentity] = contextvars.ContextVar(
+    "current_client", default=ANONYMOUS,
 )
 
 # ---------------------------------------------------------------------------
@@ -62,8 +62,9 @@ _PUBLIC_PREFIXES = (
 class BearerAuthMiddleware(BaseHTTPMiddleware):
     """Reject requests without a valid Bearer token.
 
-    In multi-user mode, resolves the token to a ``UserIdentity`` and sets it
-    on the ``current_user`` contextvar so downstream tool wrappers can read it.
+    In multi-client mode, resolves the token to a ``ClientIdentity`` and sets
+    it on the ``current_client`` contextvar so downstream tool wrappers can
+    read it.
     """
 
     def __init__(
@@ -93,24 +94,24 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
         if identity is None:
             return JSONResponse({"error": "Invalid token"}, status_code=401)
 
-        tok = current_user.set(identity)
+        tok = current_client.set(identity)
         try:
             return await call_next(request)
         finally:
-            current_user.reset(tok)
+            current_client.reset(tok)
 
-    def _resolve(self, token: str) -> UserIdentity | None:
-        """Resolve a Bearer token to a UserIdentity, or None if invalid."""
+    def _resolve(self, token: str) -> ClientIdentity | None:
+        """Resolve a Bearer token to a ClientIdentity, or None if invalid."""
 
-        # --- Multi-user mode ---
+        # --- Multi-client mode ---
         if self._auth_config is not None and self._auth_config.enabled:
             # 1) Check OAuth-issued tokens
             if self._oauth is not None:
-                identity = self._oauth.get_token_user(token)
+                identity = self._oauth.get_token_client(token)
                 if identity is not None:
                     return identity
 
-            # 2) CLI path: base64(username:password)
+            # 2) CLI path: base64(client_id:password)
             return self._try_basic_token(token)
 
         # --- Legacy single-token mode ---
@@ -122,8 +123,8 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
 
         return None
 
-    def _try_basic_token(self, token: str) -> UserIdentity | None:
-        """Decode ``base64(username:password)`` and verify against auth config."""
+    def _try_basic_token(self, token: str) -> ClientIdentity | None:
+        """Decode ``base64(client_id:password)`` and verify against auth config."""
         if self._auth_config is None:
             return None
         try:
@@ -132,11 +133,11 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
             return None
         if ":" not in decoded:
             return None
-        username, password = decoded.split(":", 1)
-        user_conf = self._auth_config.users.get(username)
-        if user_conf is None:
+        client_id, password = decoded.split(":", 1)
+        client_conf = self._auth_config.clients.get(client_id)
+        if client_conf is None:
             return None
         from mma_mcp.passwords import verify_password
-        if not verify_password(password, user_conf.password_hash):
+        if not verify_password(password, client_conf.password_hash):
             return None
-        return UserIdentity(username=username, role=user_conf.role)
+        return ClientIdentity(client_id=client_id, role=client_conf.role)

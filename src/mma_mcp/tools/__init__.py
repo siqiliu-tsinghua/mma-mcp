@@ -2,11 +2,11 @@
 
 Each tool module calls ``register()`` at import time to declare its tools.
 At startup, ``register_tools(mcp, ctx, enabled)`` selectively binds them
-to the FastMCP server based on the user's ``[tools] enabled`` config.
+to the FastMCP server based on the ``[tools] enabled`` config.
 
 Role-based access control:
   - Each role has a ``RoleRuntime`` with allowed tools and a security filter.
-  - The ``_safe_wrapper`` reads ``current_user`` contextvar to determine the
+  - The ``_safe_wrapper`` reads ``current_client`` contextvar to determine the
     active role and select the correct filter / tool permission set.
   - A ``_active_filter`` contextvar avoids mutating shared state under
     concurrent requests.
@@ -129,14 +129,14 @@ class ToolContext:
             filt.check(expr)
 
     def _current_role_runtime(self) -> RoleRuntime | None:
-        """Return the RoleRuntime for the current user, or None."""
+        """Return the RoleRuntime for the current client, or None."""
         if not self.role_runtimes:
             return None
-        from mma_mcp.auth import current_user
-        user = current_user.get()
-        if not user.role:
+        from mma_mcp.auth import current_client
+        client = current_client.get()
+        if not client.role:
             return None
-        return self.role_runtimes.get(user.role)
+        return self.role_runtimes.get(client.role)
 
     @property
     def timeout(self) -> int:
@@ -161,15 +161,15 @@ class ToolContext:
 
     @property
     def session_context(self) -> str:
-        """Return the WL context name for the current user, or "" if no isolation."""
+        """Return the WL context name for the current client, or "" if no isolation."""
         if not self.config.kernel.session_isolation:
             return ""
-        from mma_mcp.auth import current_user
+        from mma_mcp.auth import current_client
         from mma_mcp.kernel import sanitize_context_name
-        user = current_user.get()
-        if not user.username:
+        client = current_client.get()
+        if not client.client_id:
             return ""  # anonymous / stdio — no isolation
-        return sanitize_context_name(user.username)
+        return sanitize_context_name(client.client_id)
 
     @property
     def default_format(self) -> str:
@@ -223,10 +223,10 @@ def _safe_wrapper(fn: Callable, ctx: ToolContext, tool_name: str) -> Callable:
     """Wrap a tool function with role-based access control and error handling.
 
     The wrapper:
-    1. Reads ``current_user`` contextvar to determine the active role.
+    1. Reads ``current_client`` contextvar to determine the active role.
     2. Checks if the tool is allowed for that role.
     3. Sets ``_active_filter`` contextvar to the role's security filter.
-    4. Catches SecurityError / WolframKernelException → user-friendly messages.
+    4. Catches SecurityError / WolframKernelException → readable error messages.
     """
     import inspect
     from mma_mcp.kernel import KernelTimeout
@@ -291,19 +291,19 @@ def _apply_role_policy(ctx: ToolContext, tool_name: str) -> contextvars.Token | 
     if not ctx.role_runtimes:
         return None  # No RBAC configured — use global defaults
 
-    from mma_mcp.auth import current_user
-    user = current_user.get()
+    from mma_mcp.auth import current_client
+    client = current_client.get()
 
-    if not user.role:
+    if not client.role:
         return None  # Anonymous / stdio — use global defaults
 
-    runtime = ctx.role_runtimes.get(user.role)
+    runtime = ctx.role_runtimes.get(client.role)
     if runtime is None:
-        raise _AccessDenied(f"[Access Denied] Unknown role: {user.role}")
+        raise _AccessDenied(f"[Access Denied] Unknown role: {client.role}")
 
     if tool_name not in runtime.allowed_tools:
         raise _AccessDenied(
-            f"[Access Denied] Tool '{tool_name}' is not available for role '{user.role}'"
+            f"[Access Denied] Tool '{tool_name}' is not available for role '{client.role}'"
         )
 
     if runtime.expr_filter is not None:

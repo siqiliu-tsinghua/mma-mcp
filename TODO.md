@@ -78,7 +78,7 @@
 
 - [x] OAuth 2.1 授权服务器（Metadata + DCR + PKCE + Authorization Code）
 - [x] 静态 Bearer token 认证（CLI / 桌面客户端）
-- [x] 多用户支持：用户名 + 密码（scrypt 哈希，零外部依赖）
+- [x] 客户端认证：客户端 ID + 密码（scrypt 哈希，零外部依赖）
 - [x] 角色系统：每个用户绑定角色，每个角色控制可用工具和安全组
 - [x] 角色安全策略：`security = "none"` / `"blacklist"` / `"whitelist"` / 继承全局
 - [x] `contextvars` 传递用户身份，并发安全
@@ -125,7 +125,7 @@
 
 ### 部署
 
-- [x] Caddyfile.example（反向代理 + alidns DNS-01 证书）
+- [x] Caddyfile.example（HTTPS + alidns DNS-01 证书）
 - [x] .mcp.json（VSCode / Claude Code 本地 stdio 配置）
 - [x] systemd service 文件
 - [x] 部署文档 / README.md

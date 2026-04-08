@@ -1,4 +1,4 @@
-# mma-mcp Caddy 反向代理配置示例
+# mma-mcp Caddy HTTPS 配置示例
 #
 # 前提：使用带 alidns 插件的 Caddy，用 DNS-01 验证申请 Let's Encrypt 证书。
 # 不需要开放 80 端口，只需 443。

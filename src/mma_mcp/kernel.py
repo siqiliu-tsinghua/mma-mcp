@@ -369,15 +369,15 @@ def _escape_for_wl_string(s: str) -> str:
     return s.replace("\\", "\\\\").replace('"', '\\"')
 
 
-def sanitize_context_name(username: str) -> str:
-    """Convert a username to a valid WL context name.
+def sanitize_context_name(client_id: str) -> str:
+    """Convert a client identifier to a valid WL context name.
 
     Only keeps ASCII letters, digits, and ``$``; prepends ``MCP$`` and
     appends the context delimiter backtick.
 
-    Example: ``"alice"`` → ``"MCP$alice`"``
+    Example: ``"claude"`` → ``"MCP$claude`"``
     """
-    safe = "".join(c for c in username if c.isalnum() or c == "$")
+    safe = "".join(c for c in client_id if c.isalnum() or c == "$")
     if not safe:
         safe = "anonymous"
     return f"MCP${safe}`"

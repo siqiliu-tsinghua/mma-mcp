@@ -65,7 +65,7 @@ Derived policies:
 - **Whitelist mode:** reject if `used_symbols ⊄ allowed_symbols`
 
 ### Capability groups
-Symbols are pre-grouped into named capability groups (stored as JSON files). Users configure security by enabling/disabling groups, not individual symbols. Run `mma-mcp setup` to regenerate groups from the local kernel.
+Symbols are pre-grouped into named capability groups (stored as JSON files). Security is configured by enabling/disabling groups, not individual symbols. Run `mma-mcp setup` to regenerate groups from the local kernel.
 
 **Safe groups** (22, enabled by default in whitelist mode):
 `math_core`, `algebra`, `calculus`, `linear_algebra`, `statistics`, `number_theory`, `combinatorics`, `data_structures`, `programming`, `visualization`, `graph_theory`, `geometry`, `optimization`, `signal_processing`, `image`, `machine_learning`, `chemistry_biology`, `quantitative`, `compile`, `crypto`, `fractal`, `interpolation`
@@ -91,7 +91,7 @@ per request:
   → session.evaluate(expr)
 ```
 
-### User configuration (pyproject.toml / config file)
+### Configuration (pyproject.toml / config file)
 ```toml
 [security]
 mode = "whitelist"
@@ -113,61 +113,13 @@ All Wolfram Language capabilities (Solve, Integrate, Plot, CountryData, WolframA
 
 ## Deployment Scenario
 
-目标运行环境：**公网 Linux 主机 + HTTPS + 远程 MCP 客户端（Claude 网页版、ChatGPT 等）**
-
-### 传输层
-
 HTTP 模式使用 MCP Streamable HTTP 传输：
 
 ```bash
-mma-mcp --transport http --host 127.0.0.1 --port 8000
+mma-mcp serve --transport http --host 127.0.0.1 --port 8000
 ```
 
-`--host 127.0.0.1` 表示只监听本地，由 Caddy 做 TLS 终结后反向代理进来。
-
-### 反向代理：Caddy + alidns 插件
-
-域名在阿里云，使用 DNS-01 验证申请 Let's Encrypt 证书（不需要开放 80 端口）。
-
-构建带插件的 Caddy：
-
-```bash
-xcaddy build --with github.com/caddy-dns/alidns
-```
-
-配置见项目根目录的 `Caddyfile.example`。
-
-RAM 子账号需要 `AliyunDNSFullAccess` 权限（或最小化 DNS 记录写入权限）。
-
-### 客户端配置
-
-```json
-{
-  "mcpServers": {
-    "mma-mcp": {
-      "url": "https://mma-mcp.yourdomain.com/mcp"
-    }
-  }
-}
-```
-
-### systemd 服务（参考）
-
-```ini
-[Unit]
-Description=mma-mcp Wolfram Engine MCP Server
-After=network.target
-
-[Service]
-User=mma
-WorkingDirectory=/opt/mma-mcp
-ExecStart=/opt/mma-mcp/.venv/bin/mma-mcp --transport http --host 127.0.0.1 --port 8000
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
+配合 Caddy 做 TLS 终结，通过 HTTPS 供 AI 客户端连接。详见 `DEPLOY.md`。
 
 ## Development Phases
 
