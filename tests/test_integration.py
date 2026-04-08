@@ -6,9 +6,6 @@ Skip with: pytest -m "not integration"
 
 from __future__ import annotations
 
-import os
-import shutil
-
 import pytest
 
 from mma_mcp.config import AppConfig, KernelConfig, SecurityConfig
@@ -19,11 +16,6 @@ from mma_mcp.security.registry import CapabilityRegistry
 # Mark all tests in this module as integration tests
 pytestmark = pytest.mark.integration
 
-# Graphics tests need a display (Xvfb or real X11)
-_has_display = bool(os.environ.get("DISPLAY")) or shutil.which("Xvfb") is not None
-needs_display = pytest.mark.skipif(
-    not _has_display, reason="No DISPLAY or Xvfb available for graphics rendering",
-)
 
 
 # ===================================================================
@@ -78,7 +70,7 @@ class TestKernelBasic:
         )
         assert "$Aborted" in result
 
-    @needs_display
+
     def test_image_output(self, kernel):
         """evaluate_to_image should return valid PNG bytes."""
         png = kernel.evaluate_to_image("Plot[Sin[x], {x, 0, 2 Pi}]", timeout=15)
@@ -210,7 +202,7 @@ class TestFilterKernelPipeline:
         result = kernel.evaluate_to_string(expr, "OutputForm")
         assert "Cos" in result or "Sin" in result
 
-    @needs_display
+
     def test_plot_to_image(self, kernel, registry):
         config = SecurityConfig(mode="blacklist")
         filt = registry.build_filter(config)

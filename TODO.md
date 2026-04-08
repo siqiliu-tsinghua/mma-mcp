@@ -15,7 +15,7 @@
 - [x] `evaluate` / `evaluate_to_string` / `evaluate_to_image` 方法
 - [x] 内核崩溃自动重启（evaluate 失败重试一次）
 - [x] `find_kernel()` 自动探测内核路径（env → which → 常见路径）
-- [x] Xvfb 虚拟显示自动启动（无头环境下的图形渲染）
+- [x] ~~Xvfb 虚拟显示~~ 已移除——Wolfram Kernel 的 Export 不需要 DISPLAY/Xvfb，直接落盘渲染
 
 ### 安全过滤 (security/)
 
@@ -137,19 +137,13 @@
 - [x] Claude.ai (HTTP + Caddy) 远程连通测试——evaluate 文本正常，evaluate_image 图片在折叠的 tool result 中可查看
 - [x] ChatGPT (HTTP + Caddy) 远程连通测试——evaluate 文本正常，evaluate_image 图片前端不直接渲染但数据已返回，追问后可转为文件链接
 
-### 跨平台图形渲染验证
+### 跨平台验证
 
-目前图形相关的测试、系统依赖诊断和 `check_graphics()` 逻辑均在 **Debian (Linux x86-64)** 环境下完成。以下平台尚未验证：
+图形渲染已简化为直接 Export 落盘（不依赖 DISPLAY/Xvfb），但以下平台尚未验证：
 
-- [ ] Windows（原生 / WSL2）——WSL 下之前 Xvfb 方式失败，可能是缺系统依赖，待复测
-- [ ] macOS——不需要 Xvfb（有原生 display），但 Qt 插件和依赖路径可能不同
-- [ ] 其它 Linux 发行版（Ubuntu、RHEL/CentOS、Arch 等）——包名和库路径可能不同
-
-需要关注的点：
-- 系统依赖包名差异（如 `libfontconfig1` 在 RHEL 中是 `fontconfig`）
-- `ldd` / `ldconfig` 检测路径在不同发行版中的兼容性
-- macOS 下 WolframNB 是否仍需 `QT_QPA_PLATFORM=offscreen`
-- `check_graphics()` 中的依赖检测逻辑需适配非 Debian 系包管理器
+- [ ] Windows（原生 / WSL2）
+- [ ] macOS
+- [ ] 其它 Linux 发行版（Ubuntu、RHEL/CentOS、Arch 等）
 
 ## Phase 6: 安全与正确性修复
 
@@ -165,9 +159,9 @@
 ### P1：功能正确性
 
 - [x] **会话隔离不一致**：已统一 `simplify()`/`integrate()`/`differentiate()` 的 `context=ctx.session_context` 传递。
-- [x] **Xvfb 启动假阳性**：`_start_xvfb()` 现在检查进程是否立即退出 + lock 文件是否最终出现，两者任一失败返回 None。
+- [x] ~~**Xvfb 启动假阳性**~~ 已移除——实测 Wolfram Kernel Export 不需要 DISPLAY/Xvfb
 - [x] **WLD enrichment 全损**：改为 batch 级 try/except，失败的 batch 跳过并计数，已完成结果保留。
-- [x] **图形检测 Debian 耦合**：`check_graphics()` 现在先检查现有 DISPLAY，再尝试 Xvfb；返回 `display`/`xvfb`/`none`。包名提示已标注为 Debian/Ubuntu 专用。
+- [x] ~~**图形检测 Debian 耦合**~~ 已移除——整个 check_graphics/DISPLAY/Xvfb 逻辑已删除
 
 ### P2：契约与文档
 

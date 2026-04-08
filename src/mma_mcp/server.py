@@ -57,7 +57,6 @@ class App:
             kernel_path = find_kernel(self.config.kernel.mathkernel or None)
             self._kernel = KernelSession(
                 kernel=kernel_path,
-                graphics=self.config.kernel.graphics,
                 health_check_interval=self.config.kernel.health_check_interval,
                 idle_timeout=self.config.kernel.idle_timeout,
             )
@@ -266,7 +265,7 @@ def _build_parser() -> "argparse.ArgumentParser":
     sub.add_parser("init", help="Generate a default mma_mcp.toml")
 
     # --- setup ---
-    p_setup = sub.add_parser("setup", help="Check graphics + generate security groups")
+    p_setup = sub.add_parser("setup", help="Generate security group JSON files from local kernel")
     p_setup.add_argument("--force", action="store_true",
                          help="Force regeneration of security groups even if they exist")
 
@@ -330,44 +329,6 @@ def _cmd_serve(args) -> None:  # noqa: ANN001
     )
 
 
-def _update_graphics_config(mode: str) -> None:
-    """Update kernel.graphics in the config file, if one exists."""
-    import re
-    from pathlib import Path
-
-    for name in ("mma_mcp.toml", "pyproject.toml"):
-        path = Path(name)
-        if not path.exists():
-            continue
-        text = path.read_text(encoding="utf-8")
-        # Try to replace existing graphics = "..." line
-        new_text, count = re.subn(
-            r'^(\s*graphics\s*=\s*)(".*?"|\'.*?\')\s*$',
-            rf'\1"{mode}"',
-            text,
-            count=1,
-            flags=re.MULTILINE,
-        )
-        if count > 0:
-            path.write_text(new_text, encoding="utf-8")
-            print(f"已更新 {path}: kernel.graphics = \"{mode}\"")
-            return
-        # graphics line not found — try inserting after [kernel] section
-        # Look for the default_format line and add after it
-        new_text, count = re.subn(
-            r'^(\s*default_format\s*=\s*".*?")\s*$',
-            rf'\1\ngraphics = "{mode}"',
-            text,
-            count=1,
-            flags=re.MULTILINE,
-        )
-        if count > 0:
-            path.write_text(new_text, encoding="utf-8")
-            print(f"已添加 {path}: kernel.graphics = \"{mode}\"")
-            return
-    print(f"提示: 未找到配置文件。可手动设置 kernel.graphics = \"{mode}\"")
-
-
 def _cmd_init() -> None:
     path = generate_default_config()
     print(f"Generated default config: {path}")
@@ -378,24 +339,13 @@ def _cmd_setup(force: bool = False) -> None:
     config = load_config()
     kernel_path = config.kernel.mathkernel or None
 
-    # 1. Graphics capability check (first, so user can install deps before
-    #    the slow group generation step)
-    print("--- 图形渲染检测 ---")
-    from mma_mcp.kernel import check_graphics
-    result = check_graphics(kernel_path=kernel_path)
-    print(result.message)
-    print(f"推荐配置: kernel.graphics = \"{result.mode}\"")
-    _update_graphics_config(result.mode)
-
-    # 2. Regenerate security group JSON files (slow, ~1 min)
     from mma_mcp.setup_groups import GROUPS_DIR
     manifest_path = GROUPS_DIR / "manifest.json"
     if not force and manifest_path.exists():
-        print(f"\n安全分组已存在 ({manifest_path})，跳过生成。")
+        print(f"安全分组已存在 ({manifest_path})，跳过生成。")
         print("如需重新生成，请运行: mma-mcp setup --force")
         return
 
-    print("\n--- 安全分组生成 ---")
     from mma_mcp.setup_groups import run_setup
     run_setup(kernel_path=kernel_path)
 

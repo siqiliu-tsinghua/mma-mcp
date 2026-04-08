@@ -8,9 +8,6 @@ Skip with: pytest -m "not integration"
 
 from __future__ import annotations
 
-import os
-import shutil
-
 import pytest
 
 from mma_mcp.config import AppConfig, KernelConfig, SecurityConfig, ToolsConfig
@@ -18,10 +15,6 @@ from mma_mcp.server import App
 
 pytestmark = pytest.mark.integration
 
-_has_display = bool(os.environ.get("DISPLAY")) or shutil.which("Xvfb") is not None
-needs_display = pytest.mark.skipif(
-    not _has_display, reason="No DISPLAY or Xvfb available for graphics rendering",
-)
 
 
 # ===================================================================
@@ -175,7 +168,7 @@ class TestEvaluateTool:
 
 class TestEvaluateImageTool:
 
-    @needs_display
+
     @pytest.mark.asyncio
     async def test_plot_image(self, mcp):
         result = await mcp.call_tool("evaluate_image", {
@@ -185,7 +178,7 @@ class TestEvaluateImageTool:
         assert png[:4] == b"\x89PNG"
         assert len(png) > 1000
 
-    @needs_display
+
     @pytest.mark.asyncio
     async def test_plot3d_image(self, mcp):
         result = await mcp.call_tool("evaluate_image", {

@@ -29,7 +29,6 @@ class KernelConfig:
     max_result_size: int = 65536  # max result string length (chars); 0 = no limit
     session_isolation: bool = True  # isolate user variables via WL context namespacing
     default_format: str = "TeXForm"
-    graphics: str = "auto"         # "auto" (detect at startup), "xvfb", "none"
     health_check_interval: int = 60  # seconds between health pings; 0 = disabled
     idle_timeout: int = 0            # reclaim kernel after N seconds idle; 0 = never
 
@@ -188,7 +187,6 @@ def _build_kernel_config(raw: dict[str, Any]) -> KernelConfig:
         max_result_size=sec.get("max_result_size", defaults.max_result_size),
         session_isolation=sec.get("session_isolation", defaults.session_isolation),
         default_format=sec.get("default_format", defaults.default_format),
-        graphics=sec.get("graphics", defaults.graphics),
         health_check_interval=sec.get("health_check_interval", defaults.health_check_interval),
         idle_timeout=sec.get("idle_timeout", defaults.idle_timeout),
     )
@@ -296,12 +294,6 @@ def _validate(config: AppConfig) -> None:
         errors.append(f"kernel.health_check_interval must be >= 0, got {config.kernel.health_check_interval}")
     if config.kernel.idle_timeout < 0:
         errors.append(f"kernel.idle_timeout must be >= 0, got {config.kernel.idle_timeout}")
-    valid_graphics = {"auto", "xvfb", "none"}
-    if config.kernel.graphics not in valid_graphics:
-        errors.append(
-            f"kernel.graphics must be one of {sorted(valid_graphics)}, "
-            f"got {config.kernel.graphics!r}"
-        )
     if config.kernel.mathkernel and not Path(config.kernel.mathkernel).exists():
         errors.append(f"kernel.mathkernel path does not exist: {config.kernel.mathkernel}")
     # server
@@ -452,13 +444,6 @@ health_check_interval = 60
 # is stopped to free resources. It restarts automatically on the next request.
 # 0 = never reclaim.
 idle_timeout = 0
-
-# Graphics rendering backend:
-#   "auto"  — detect at startup (try Xvfb, fall back to "none")
-#   "xvfb"  — require Xvfb (fail fast if unavailable)
-#   "none"  — disable graphics (evaluate_image/plot tools return error)
-# Run `mma-mcp setup` to auto-detect and write the correct value.
-graphics = "auto"
 
 # ─── Server Transport ────────────────────────────────────────────────────────
 

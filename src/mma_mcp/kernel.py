@@ -11,7 +11,6 @@ import concurrent.futures
 import logging
 import os
 import shutil
-import subprocess
 import tempfile
 import threading
 import time
@@ -75,106 +74,6 @@ def find_kernel(hint: str | None = None) -> str | None:
     return None
 
 
-_display_available: bool = False
-
-# System packages required by WolframNB (Qt-based renderer)
-_GRAPHICS_DEPS = "xvfb libfontconfig1 fonts-dejavu-core libxkbcommon0 libegl1"
-_GRAPHICS_INSTALL_HINT = f"sudo apt-get install -y {_GRAPHICS_DEPS}  (Debian/Ubuntu)"
-
-
-def display_available() -> bool:
-    """Return True if a DISPLAY has been set up for graphics rendering."""
-    return _display_available
-
-
-def _start_xvfb() -> str | None:
-    """Start Xvfb on :99 if not already running. Returns display string or None."""
-    import time
-
-    display = ":99"
-    lock = Path(f"/tmp/.X{display[1:]}-lock")
-    if lock.exists():
-        logger.info("Xvfb already running on %s", display)
-        return display
-    try:
-        proc = subprocess.Popen(
-            ["Xvfb", display, "-screen", "0", "1280x1024x24"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        for _ in range(20):
-            if lock.exists():
-                break
-            if proc.poll() is not None:
-                logger.warning("Xvfb exited immediately with code %d", proc.returncode)
-                return None
-            time.sleep(0.1)
-        if not lock.exists():
-            logger.warning("Xvfb lock file %s never appeared", lock)
-            return None
-        logger.info("Started Xvfb on %s", display)
-        return display
-    except Exception:
-        logger.warning("Failed to start Xvfb", exc_info=True)
-        return None
-
-
-def _ensure_display(graphics_mode: str = "auto") -> None:
-    """Set up display environment for graphics rendering.
-
-    Args:
-        graphics_mode: ``"auto"`` (detect), ``"display"`` (trust existing
-            DISPLAY), ``"xvfb"`` (require Xvfb), ``"none"`` (skip).
-    """
-    global _display_available
-
-    # WolframNB is Qt-based; offscreen plugin avoids xcb failures in headless envs
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
-    if graphics_mode == "none":
-        logger.info("Graphics disabled by configuration (kernel.graphics = 'none')")
-        return
-
-    # "display" mode: trust whatever DISPLAY is already set
-    if graphics_mode == "display":
-        if os.environ.get("DISPLAY"):
-            _display_available = True
-        else:
-            logger.error(
-                "kernel.graphics = 'display' but DISPLAY is not set. "
-                "Falling back to Xvfb.",
-            )
-            # Fall through to Xvfb attempt
-            graphics_mode = "auto"
-        if _display_available:
-            return
-
-    # Already have a display (auto/xvfb modes)
-    if os.environ.get("DISPLAY"):
-        _display_available = True
-        return
-
-    if not shutil.which("Xvfb"):
-        if graphics_mode == "xvfb":
-            logger.error(
-                "kernel.graphics = 'xvfb' but Xvfb not found. "
-                "Install (Debian/Ubuntu): %s", _GRAPHICS_INSTALL_HINT,
-            )
-        else:
-            logger.warning(
-                "No DISPLAY and Xvfb not found — graphics unavailable. "
-                "Install (Debian/Ubuntu): %s", _GRAPHICS_INSTALL_HINT,
-            )
-        return
-
-    display = _start_xvfb()
-    if display:
-        os.environ["DISPLAY"] = display
-        _display_available = True
-    elif graphics_mode == "xvfb":
-        logger.error("kernel.graphics = 'xvfb' but failed to start Xvfb")
-
-
 class KernelTimeout(Exception):
     """Raised when the kernel does not respond within the hard timeout."""
 
@@ -185,19 +84,16 @@ class KernelSession:
     def __init__(
         self,
         kernel: str | None = None,
-        graphics: str = "auto",
         health_check_interval: int = 0,
         idle_timeout: int = 0,
     ) -> None:
         """
         Args:
             kernel:   Path to WolframKernel binary. None = auto-detect.
-            graphics: Graphics mode — ``"auto"``, ``"xvfb"``, or ``"none"``.
             health_check_interval: Seconds between health pings. 0 = disabled.
             idle_timeout: Stop kernel after N seconds idle. 0 = never.
         """
         self._kernel = kernel or find_kernel()
-        self._graphics = graphics
         self._health_check_interval = health_check_interval
         self._idle_timeout = idle_timeout
         self._session: WolframLanguageSession | None = None
@@ -212,7 +108,6 @@ class KernelSession:
     def start(self) -> None:
         if self._session is not None:
             return
-        _ensure_display(self._graphics)
         logger.info("Starting Wolfram kernel session (kernel=%s)", self._kernel or "auto")
         self._session = self._make_session()
         self._session.start()
@@ -396,12 +291,6 @@ class KernelSession:
             context:      WL context for session isolation.
         """
         self._ensure_started()
-        if not _display_available:
-            raise RuntimeError(
-                "Graphics rendering unavailable: no DISPLAY set and Xvfb not found. "
-                "Install xvfb: sudo apt-get install -y xvfb libfontconfig1 "
-                "fonts-dejavu-core libxkbcommon0 libegl1"
-            )
         inner = _wrap_context(expr_str, context)
         if timeout > 0:
             inner = f"TimeConstrained[{inner}, {timeout}]"
@@ -492,161 +381,3 @@ def sanitize_context_name(username: str) -> str:
     if not safe:
         safe = "anonymous"
     return f"MCP${safe}`"
-
-
-# ---------------------------------------------------------------------------
-# Graphics capability check (used by `mma-mcp setup`)
-# ---------------------------------------------------------------------------
-
-class GraphicsCheckResult:
-    """Result of a graphics rendering capability test."""
-
-    __slots__ = ("ok", "mode", "message", "missing_deps")
-
-    def __init__(
-        self, ok: bool, mode: str, message: str, missing_deps: list[str],
-    ) -> None:
-        self.ok = ok
-        self.mode = mode          # "display", "xvfb", or "none"
-        self.message = message    # human-readable summary
-        self.missing_deps = missing_deps
-
-
-def _render_test_plot(kernel_path: str | None) -> tuple[bool, int]:
-    """Render a small test plot. Returns (success, png_size)."""
-    ks = KernelSession(kernel=kernel_path, graphics="none")  # skip _ensure_display
-    ks.start()
-    try:
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-            tmp = f.name
-        export_expr = wl.Export(
-            tmp,
-            wl.Rasterize(
-                wlexpr('Plot[Sin[x], {x, 0, 2 Pi}]'),
-                wlexpr('ImageResolution -> 72'),
-            ),
-            "PNG",
-        )
-        ks.evaluate(export_expr, hard_timeout=30)
-        data = Path(tmp).read_bytes()
-        Path(tmp).unlink(missing_ok=True)
-        return (data[:4] == b"\x89PNG" and len(data) > 500), len(data)
-    finally:
-        ks.stop()
-
-
-def check_graphics(kernel_path: str | None = None) -> GraphicsCheckResult:
-    """Test whether graphics rendering works end-to-end.
-
-    Detection order:
-      1. If DISPLAY is already set (native X11, Wayland, VNC, etc.), try
-         rendering with it.  Success → mode="display".
-      2. Otherwise, check for Xvfb + shared libs, start Xvfb, try rendering.
-         Success → mode="xvfb".
-      3. Everything else → mode="none".
-
-    Returns a ``GraphicsCheckResult`` with the diagnosis.
-    """
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
-    # ------------------------------------------------------------------
-    # 1. Try existing DISPLAY first
-    # ------------------------------------------------------------------
-    existing_display = os.environ.get("DISPLAY")
-    if existing_display:
-        try:
-            ok, size = _render_test_plot(kernel_path)
-            if ok:
-                return GraphicsCheckResult(
-                    ok=True, mode="display",
-                    message=f"图形渲染测试通过 ✓  (使用现有 DISPLAY={existing_display}, PNG {size} bytes)",
-                    missing_deps=[],
-                )
-            # Existing display didn't work — fall through to Xvfb
-            logger.info("Existing DISPLAY=%s render failed, trying Xvfb", existing_display)
-        except KernelTimeout:
-            logger.info("Existing DISPLAY=%s render timed out, trying Xvfb", existing_display)
-        except Exception as e:
-            logger.info("Existing DISPLAY=%s render error: %s, trying Xvfb", existing_display, e)
-
-    # ------------------------------------------------------------------
-    # 2. Check deps and try Xvfb
-    # ------------------------------------------------------------------
-    missing: list[str] = []
-
-    if not shutil.which("Xvfb"):
-        missing.append("xvfb")
-
-    # Shared libs needed by WolframNB (Qt-based renderer)
-    _lib_to_pkg = {
-        "libfontconfig.so.1": "libfontconfig1",
-        "libxkbcommon.so.0": "libxkbcommon0",
-        "libEGL.so.1": "libegl1",
-    }
-    try:
-        ldconfig_out = subprocess.run(
-            ["ldconfig", "-p"], capture_output=True, text=True, timeout=5,
-        ).stdout
-    except Exception:
-        ldconfig_out = ""  # can't check — will try rendering anyway
-
-    for lib, pkg in _lib_to_pkg.items():
-        if ldconfig_out and lib not in ldconfig_out:
-            missing.append(pkg)
-
-    if missing:
-        return GraphicsCheckResult(
-            ok=False,
-            mode="none",
-            message=(
-                f"缺少系统依赖: {', '.join(missing)}\n"
-                f"安装命令 (Debian/Ubuntu): sudo apt-get install -y {' '.join(missing)}\n"
-                f"图形功能将被禁用。安装后可重新运行 mma-mcp setup 检测。"
-            ),
-            missing_deps=missing,
-        )
-
-    # Start Xvfb
-    display = _start_xvfb()
-    if not display:
-        return GraphicsCheckResult(
-            ok=False, mode="none",
-            message="Xvfb 已安装但启动失败。",
-            missing_deps=[],
-        )
-
-    saved_display = os.environ.get("DISPLAY")
-    os.environ["DISPLAY"] = display
-    try:
-        ok, size = _render_test_plot(kernel_path)
-        if ok:
-            return GraphicsCheckResult(
-                ok=True, mode="xvfb",
-                message=f"图形渲染测试通过 ✓  (PNG {size} bytes)",
-                missing_deps=[],
-            )
-        return GraphicsCheckResult(
-            ok=False, mode="none",
-            message=f"渲染输出无效 (size={size})",
-            missing_deps=[],
-        )
-    except KernelTimeout:
-        return GraphicsCheckResult(
-            ok=False, mode="none",
-            message=(
-                "渲染超时（30秒）——可能缺少系统依赖。\n"
-                f"确认已安装 (Debian/Ubuntu): {_GRAPHICS_INSTALL_HINT}"
-            ),
-            missing_deps=[],
-        )
-    except Exception as e:
-        return GraphicsCheckResult(
-            ok=False, mode="none",
-            message=f"渲染测试异常: {e}",
-            missing_deps=[],
-        )
-    finally:
-        if saved_display is not None:
-            os.environ["DISPLAY"] = saved_display
-        else:
-            os.environ.pop("DISPLAY", None)

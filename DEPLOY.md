@@ -26,7 +26,7 @@ uv sync
 which WolframKernel
 # 或者 ls /usr/local/Wolfram/Mathematica/14.3/Executables/WolframKernel
 
-# 5. 生成安全分组 + 检测图形能力（约 1 分钟）
+# 5. 生成安全分组（约 1 分钟，首次运行需要启动内核查询符号分类）
 uv run mma-mcp setup
 ```
 
