@@ -76,6 +76,72 @@
   `Needs` 在 `file_read` 中，但 `ParallelNeeds` 不在。
   修复：将 `ParallelNeeds` 加入 `file_read` 危险组。
 
+## 架构演进: 内核 Worker 池（跨客户端隔离）
+
+> 2026-04-09 讨论确定方案。当前单内核 + context 命名空间隔离存在跨客户端攻击面
+> （Contexts/Names 可发现其他客户端符号，可篡改/UpValue 注入），需改为进程级隔离。
+
+### 安全动机
+
+当前 `_wrap_context()` 用 `Block[{$Context, $ContextPath}, ...]` 做命名空间分区，
+但恶意客户端可以：
+1. `Contexts[]` 发现其他客户端的上下文名
+2. `Names["MCP$alice`*"]` 列出其他客户端的变量
+3. 直接赋值篡改其他客户端变量
+4. 通过 UpValues 注入修改其他客户端的函数行为
+
+### 设计方案: 无状态 Worker 池
+
+借鉴 Apache prefork MPM 策略，但适配 Wolfram 内核的特点（启动慢、内存重但空闲时轻）。
+
+**核心原则：每次工具调用独占一个 worker，用完清理归还，不保留跨调用状态。**
+AI 客户端天然擅长生成自包含表达式（用 Module/With/Block 封装局部状态），
+不需要 REPL 式跨调用变量持久化。
+
+#### 配置项
+
+```toml
+[kernel]
+pool_size = 4                   # worker 硬上限，默认 min(cpu_count, 4)
+pool_min_idle = 1               # 最少保持 1 个热 worker（懒创建其余）
+max_requests_per_worker = 100   # 每 100 次请求重启 worker（防内存膨胀）
+```
+
+#### 池行为
+
+- **懒创建**：启动时只创建 `pool_min_idle` 个 worker，并发请求到来时按需扩到 `pool_size`
+- **独占使用**：每次工具调用从池中 acquire 一个空闲 worker，评估期间其他请求不会共享该 worker
+- **调用清理**：每次调用用随机临时上下文 `Tmp$<random>`，执行后 `Remove["Tmp$...`*"]`
+- **定期重启**：worker 处理 `max_requests_per_worker` 次后重启内核进程，兜底清理
+- **空闲回收**：超过 `pool_min_idle` 的空闲 worker 在 idle timeout 后关闭
+- **health check**：保留现有机制，下沉到每个 worker
+
+#### 实际内存开销（本机实测）
+
+空闲 WolframKernel 进程 RSS 仅 10-20MB，中度使用 ~200MB，重度使用可达 ~800MB。
+池大小设为 4 时，空闲状态总开销 < 100MB，`max_requests_per_worker` 定期重启防止膨胀。
+
+#### 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| 新增 `pool.py` | `KernelPool` 类：worker 生命周期、acquire/release、清理、动态伸缩 |
+| `config.py` | 添加 `pool_size`、`pool_min_idle`、`max_requests_per_worker`；废弃 `session_isolation` |
+| `kernel.py` | 移除 `_wrap_context()`、`sanitize_context_name()`（不再需要 per-client context） |
+| `tools/__init__.py` | `ToolContext` 持有 pool 而非单个 kernel；移除 `session_context` 属性 |
+| `tools/evaluate.py` | 通过 pool acquire/release 执行 |
+| `server.py` | 构建 `KernelPool` 替代单个 `KernelSession` |
+| `tests/` | 新增 pool 单元测试；更新现有测试 |
+
+#### 未来扩展（不在本次范围）
+
+有状态会话（dedicated worker）可作为独立工具实现，仅开放给有授权的角色，
+通过 RBAC 控制访问。当前只做无状态池。
+
+---
+
+## P3: 小问题 / 整洁性（剩余）
+
 - [ ] **无 CI/CD 配置**
   没有 GitHub Actions 等自动化测试。
   修复方向：添加基本的 pytest CI workflow（至少跑非 integration 的单元测试）。

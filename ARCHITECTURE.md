@@ -139,13 +139,16 @@ mma-mcp 是一个 [Model Context Protocol (MCP)](https://modelcontextprotocol.io
 
 **已知局限**：动态字符串拼接构造符号名（如 `ToExpression["Ru" <> "n"]`）无法被静态分析捕获。因此 `ToExpression` 本身被归入 `dynamic_eval` 危险组，默认阻断。
 
-### 2. 持久内核会话（非按需启动）
+### 2. 内核会话管理
 
-使用单个长生命周期的 `WolframLanguageSession`，而非每次请求启动新内核。
+**当前实现**：单个长生命周期的 `WolframLanguageSession`，多客户端通过 `Block[{$Context}]` 做命名空间分区。
 
 - **原因**：Wolfram 内核启动需要 3-5 秒，频繁启动不可接受。
-- **代价**：单进程单会话，不支持并行计算。
-- **缓解**：内核崩溃自动重启（`evaluate` 失败重试一次）；内核懒启动（首次工具调用时才启动，不阻塞 MCP 握手）。
+- **缓解**：内核崩溃自动重启；内核懒启动（首次工具调用时才启动）。
+
+**已知安全局限**：当前的 context 命名空间隔离不提供访问控制——恶意客户端可通过 `Contexts[]`/`Names[]` 发现并篡改其他客户端的变量，或通过 UpValues 注入修改其他客户端的函数行为。
+
+**演进方向（已设计，待实现）**：无状态 Worker 池。借鉴 Apache prefork MPM，维护多个独立内核进程，每次工具调用独占一个 worker，用完清理归还。池支持懒创建、空闲回收、定期重启（防内存膨胀）。详见 TODO.md「内核 Worker 池」章节。
 
 ### 3. 配置驱动而非代码驱动
 
