@@ -62,8 +62,8 @@ mma-mcp/
 ├── README-cn.md                   # Chinese README
 ├── ARCHITECTURE.md                # Architecture documentation (English)
 ├── ARCHITECTURE-cn.md             # Architecture documentation (Chinese)
-├── DEPLOY.md                      # VPS deployment guide (English)
-├── DEPLOY-cn.md                   # VPS deployment guide (Chinese)
+├── DEPLOY.md                      # HTTPS deployment guide (English)
+├── DEPLOY-cn.md                   # HTTPS deployment guide (Chinese)
 ├── CONTRIBUTING.md                # Contributing guide (English)
 ├── CONTRIBUTING-cn.md             # Contributing guide (Chinese)
 ├── SECURITY.md                    # Security policy (English)

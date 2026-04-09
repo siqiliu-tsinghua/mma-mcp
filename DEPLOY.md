@@ -1,18 +1,18 @@
-# mma-mcp VPS Deployment Guide
+# mma-mcp HTTPS Deployment Guide
 
-> **Use case:** This guide is for individual users who hold a Wolfram Engine / Mathematica license and want to expose their local Wolfram kernel over HTTPS to their own web/mobile AI clients (Claude.ai, ChatGPT, etc.), so they can use Wolfram computation from any device. The deployed service is for the license holder's personal use only. Whether other use cases are permitted depends on your Wolfram license terms.
+> **Use case:** This guide is for individual users who hold a Wolfram Engine / Mathematica license and want to expose their Wolfram kernel over HTTPS to their own web/mobile AI clients (Claude.ai, ChatGPT, etc.), so they can use Wolfram computation from any device. The deployed service is for the license holder's personal use only. Whether other use cases are permitted depends on your Wolfram license terms.
 
 > **Target platform:** This guide targets **Debian / Ubuntu** Linux. Package names and systemd details may differ on other distributions. Contributions for other platforms are welcome (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 
 ## Prerequisites
 
-- Debian / Ubuntu VPS with Wolfram Engine / Mathematica 14.3 installed and licensed
-- A domain name pointing to your VPS
+- Debian / Ubuntu server with Wolfram Engine / Mathematica 14.3 installed and licensed
+- A domain name pointing to your server's public IP
 - Port 443 available (and port 80 if using HTTP-01 challenge)
 
 ---
 
-## 1. VPS Environment Setup
+## 1. Environment Setup
 
 ```bash
 # 1. Clone the project
@@ -41,12 +41,12 @@ uv run mma-mcp setup
 ```bash
 # Add an A record in your DNS provider's console:
 #   Host: mma (or your preferred subdomain)
-#   Value: <VPS public IP>
+#   Value: <server public IP>
 #   TTL: 600
 
 # Verify DNS propagation
 dig mma.yourdomain.com +short
-# Should return your VPS public IP
+# Should return your server's public IP
 ```
 
 ---

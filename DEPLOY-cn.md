@@ -1,18 +1,18 @@
-# mma-mcp VPS 部署指南
+# mma-mcp HTTPS 部署指南
 
-> **使用场景：** 本指南面向已持有 Wolfram Engine / Mathematica 许可证的个人用户，帮助你将本地 Wolfram 内核通过 HTTPS 挂载到自己的网页版和移动版 AI 客户端（如 Claude.ai、ChatGPT），以便在任何设备上使用 Wolfram 计算能力。部署后的服务仅供许可证持有者本人使用。是否可用于其他场景，请自行根据你的 Wolfram 许可证条款确认。
+> **使用场景：** 本指南面向已持有 Wolfram Engine / Mathematica 许可证的个人用户，帮助你将安装了 Wolfram 的机器通过 HTTPS 连接到自己的网页版和移动版 AI 客户端（如 Claude.ai、ChatGPT），以便在任何设备上使用 Wolfram 计算能力。部署后的服务仅供许可证持有者本人使用。是否可用于其他场景，请自行根据你的 Wolfram 许可证条款确认。
 
 > **适用平台：** 本指南针对 **Debian / Ubuntu** 系 Linux。其他发行版的包名和 systemd 细节可能不同，欢迎贡献适配文档（见 [CONTRIBUTING-cn.md](CONTRIBUTING-cn.md)）。
 
 ## 前置条件
 
-- Debian / Ubuntu VPS，已持有并安装 Wolfram Engine / Mathematica 14.3
-- 一个指向 VPS 的域名
+- Debian / Ubuntu 服务器，已持有并安装 Wolfram Engine / Mathematica 14.3
+- 一个指向该服务器公网 IP 的域名
 - 443 端口可用（使用 HTTP-01 验证时还需要 80 端口）
 
 ---
 
-## 一、VPS 环境准备
+## 一、环境准备
 
 ```bash
 # 1. 克隆项目
@@ -38,17 +38,17 @@ uv run mma-mcp setup
 
 ## 二、域名 DNS
 
-在你的域名服务商控制台添加 A 记录，将子域名指向 VPS 公网 IP：
+在你的域名服务商控制台添加 A 记录，将子域名指向服务器公网 IP：
 
 ```bash
 # 示例：
 #   主机记录: mma（或你喜欢的子域名）
-#   记录值:   <VPS 公网 IP>
+#   记录值:   <服务器公网 IP>
 #   TTL:      600
 
 # 验证 DNS 生效
 dig mma.yourdomain.com +short
-# 应返回 VPS 公网 IP
+# 应返回服务器公网 IP
 ```
 
 ---
