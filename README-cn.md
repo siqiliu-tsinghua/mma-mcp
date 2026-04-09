@@ -36,7 +36,7 @@
 
 ```bash
 # 克隆并安装
-git clone https://github.com/liusq7/mma-mcp.git
+git clone https://github.com/<owner>/mma-mcp.git
 cd mma-mcp
 uv sync
 
@@ -66,6 +66,22 @@ uv run mma-mcp serve
   }
 }
 ```
+
+### Claude Desktop（stdio）
+
+添加到 `claude_desktop_config.json`（Settings -> Developer -> Edit Config）：
+
+```json
+{
+  "mcpServers": {
+    "mma-mcp": {
+      "command": "/path/to/mma-mcp/.venv/bin/mma-mcp"
+    }
+  }
+}
+```
+
+> macOS/Linux 下配置文件位于 `~/Library/Application Support/Claude/claude_desktop_config.json` 或 `~/.config/Claude/claude_desktop_config.json`。
 
 ### HTTP 传输
 

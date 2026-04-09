@@ -16,7 +16,7 @@
 
 ```bash
 # 1. 克隆项目
-git clone https://github.com/liusq7/mma-mcp.git /opt/mma-mcp
+git clone https://github.com/<owner>/mma-mcp.git /opt/mma-mcp
 cd /opt/mma-mcp
 
 # 2. 安装 uv（如未安装）

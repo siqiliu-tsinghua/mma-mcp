@@ -40,7 +40,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that w
 
 ```bash
 # Clone and install
-git clone https://github.com/liusq7/mma-mcp.git
+git clone https://github.com/<owner>/mma-mcp.git
 cd mma-mcp
 uv sync
 
@@ -70,6 +70,22 @@ Add to your `.mcp.json`:
   }
 }
 ```
+
+### Claude Desktop (stdio)
+
+Add to your `claude_desktop_config.json` (Settings -> Developer -> Edit Config):
+
+```json
+{
+  "mcpServers": {
+    "mma-mcp": {
+      "command": "/path/to/mma-mcp/.venv/bin/mma-mcp"
+    }
+  }
+}
+```
+
+> On macOS/Linux, find the config at `~/Library/Application Support/Claude/claude_desktop_config.json` or `~/.config/Claude/claude_desktop_config.json`.
 
 ### HTTP Transport
 
