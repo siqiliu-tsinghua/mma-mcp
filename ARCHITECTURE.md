@@ -70,7 +70,7 @@ mma-mcp 是一个 [Model Context Protocol (MCP)](https://modelcontextprotocol.io
 │         └────────────┬────────────┘                     │
 │                      │  clean expression                │
 │              ┌───────▼───────┐                          │
-│              │  KernelPool   │  无状态 worker 池         │
+│              │  KernelPool   │  worker 池         │
 │              │  (pool.py)    │  进程级隔离               │
 │              └───────┬───────┘                          │
 │                      │  acquire → execute → release     │
@@ -97,7 +97,7 @@ mma-mcp 是一个 [Model Context Protocol (MCP)](https://modelcontextprotocol.io
 | **Server** | `server.py` | `App` 类封装服务器全生命周期；CLI 入口 (`main`)；argparse 子命令；HTTP/stdio 启动 |
 | **Config** | `config.py` | TOML 配置加载/校验/默认值生成；所有 dataclass 定义（Kernel/Server/TLS/Security/Tools/Auth/Role/Client） |
 | **Kernel** | `kernel.py` | `KernelSession` 管理单个 Wolfram 内核生命周期；自动探测内核路径；崩溃自动重启；Python 侧硬超时 |
-| **Pool** | `pool.py` | `KernelPool` 无状态 worker 池；懒创建、独占使用、临时上下文清理、定期重启、空闲回收 |
+| **Pool** | `pool.py` | `KernelPool` worker 池；懒创建、独占使用、临时上下文清理、定期重启、空闲回收；进程级隔离 |
 
 ### 安全模块
 
@@ -105,7 +105,7 @@ mma-mcp 是一个 [Model Context Protocol (MCP)](https://modelcontextprotocol.io
 |------|------|------|
 | **Filter** | `security/filter.py` | `ExpressionFilter`：正则提取 WL 符号 → 黑/白名单校验；处理 `Symbol["X"]` 和 `<<` 语法糖 |
 | **Registry** | `security/registry.py` | `CapabilityRegistry`：加载分组 JSON → 构建 `ExpressionFilter`；支持多次 `build_filter` 生成不同策略 |
-| **Groups** | `security/groups/*.json` | 28 个预生成的符号分组（22 安全 + 6 危险），由 `mma-mcp setup` 基于 WolframLanguageData 生成 |
+| **Groups** | `security/groups/*.json` | 29 个预生成的符号分组（22 安全 + 7 危险），由 `mma-mcp setup` 基于 WolframLanguageData 生成 |
 
 ### 认证模块
 

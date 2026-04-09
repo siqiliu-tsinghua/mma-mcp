@@ -186,6 +186,10 @@ class OAuthServer:
         self._auth_codes: dict[str, _AuthCode] = {}
         self._login_failures: dict[str, tuple[int, float]] = {}
 
+    def close(self) -> None:
+        """Release the underlying SQLite connection."""
+        self._store.close()
+
     @property
     def multi_client(self) -> bool:
         return self._multi_client

@@ -76,16 +76,25 @@ class TestOAuthServerLegacy:
 
     def test_validate_token_with_password(self):
         srv = OAuthServer(password="my-secret", db_path=":memory:")
-        assert srv.validate_token("my-secret")
-        assert not srv.validate_token("wrong")
+        try:
+            assert srv.validate_token("my-secret")
+            assert not srv.validate_token("wrong")
+        finally:
+            srv.close()
 
     def test_get_token_client_returns_none_legacy(self):
         srv = OAuthServer(password="my-secret", db_path=":memory:")
-        assert srv.get_token_client("anything") is None
+        try:
+            assert srv.get_token_client("anything") is None
+        finally:
+            srv.close()
 
     def test_multi_client_is_false(self):
         srv = OAuthServer(password="my-secret", db_path=":memory:")
-        assert not srv.multi_client
+        try:
+            assert not srv.multi_client
+        finally:
+            srv.close()
 
 
 # ===================================================================
@@ -105,7 +114,9 @@ class TestOAuthServerMultiClient:
 
     @pytest.fixture
     def srv(self, auth_config):
-        return OAuthServer(auth_config=auth_config, db_path=":memory:")
+        s = OAuthServer(auth_config=auth_config, db_path=":memory:")
+        yield s
+        s.close()
 
     def test_multi_client_is_true(self, srv):
         assert srv.multi_client
@@ -215,7 +226,9 @@ class TestOAuthClientValidation:
             roles={"admin": RoleConfig(tools="*", security="none")},
             clients={"alice": ClientConfig(role="admin", password_hash=pwd_hash)},
         )
-        return OAuthServer(auth_config=config, db_path=":memory:")
+        s = OAuthServer(auth_config=config, db_path=":memory:")
+        yield s
+        s.close()
 
     def _register_client(self, srv, redirect_uris=None):
         """Helper: register a client and return (client_id, redirect_uris)."""

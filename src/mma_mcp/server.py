@@ -182,6 +182,7 @@ class App:
 
         if self.config.auth.enabled:
             oauth_server = OAuthServer(auth_config=self.config.auth)
+            self._oauth_server = oauth_server
             for route in oauth_server.routes():
                 app.routes.insert(0, route)
             app.add_middleware(
@@ -189,6 +190,7 @@ class App:
                 oauth_server=oauth_server,
                 auth_config=self.config.auth,
             )
+            app.add_event_handler("shutdown", oauth_server.close)
             logger.info(
                 "Client auth enabled (%d clients, %d roles)",
                 len(self.config.auth.clients), len(self.config.auth.roles),
@@ -209,11 +211,13 @@ class App:
             sys.exit(1)
 
         oauth_server = OAuthServer(password=token)
+        self._oauth_server = oauth_server
         for route in oauth_server.routes():
             app.routes.insert(0, route)
         app.add_middleware(
             BearerAuthMiddleware, token=token, oauth_server=oauth_server,
         )
+        app.add_event_handler("shutdown", oauth_server.close)
         logger.info("Legacy single-token auth enabled (env: %s)", token_env)
 
     # ------------------------------------------------------------------
