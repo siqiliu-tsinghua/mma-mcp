@@ -349,7 +349,7 @@ sudo journalctl -u caddy-mma --no-pager | tail -30
 ## 9. Connect from Claude Web
 
 1. Go to https://claude.ai
-2. Settings -> MCP Servers -> Add Server
+2. Settings -> Connectors -> Add custom connector
 3. URL: `https://mma.yourdomain.com/mcp`
 4. Complete the OAuth 2.1 authentication flow:
    - Mode A: enter client ID (e.g., `claude`) and password
