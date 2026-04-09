@@ -1,9 +1,8 @@
-"""Wolfram kernel worker pool for stateless, isolated evaluation.
+"""Wolfram kernel worker pool for isolated evaluation.
 
 Each tool call acquires an exclusive worker from the pool, evaluates in a
 temporary WL context, cleans up, and returns the worker.  This provides
-process-level isolation between concurrent clients — no cross-client
-symbol leakage via ``Contexts[]`` / ``Names[]`` / ``UpValues``.
+process-level isolation between concurrent clients.
 
 Pool behaviour (inspired by Apache prefork MPM):
   - Lazy creation: only ``pool_min_idle`` workers at startup, rest on demand.

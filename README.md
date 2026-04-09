@@ -121,7 +121,7 @@ uv run mma-mcp hash-password
 uv run mma-mcp add-client claude --role admin
 ```
 
-Each client is bound to a role that controls which tools it can access, which Wolfram symbols it can use, and resource limits (timeout, result size).  Variables are isolated per client via WL context namespacing.
+Each client is bound to a role that controls which tools it can access, which Wolfram symbols it can use, and resource limits (timeout, result size).  Concurrent clients are isolated via a kernel worker pool — each tool call runs in an exclusive kernel process with a temporary WL context.
 
 See the `[auth]` section in `mma_mcp.toml` for configuration details.
 

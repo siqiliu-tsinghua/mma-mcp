@@ -111,6 +111,10 @@
     "external_services": {
       "description": "Connect to Wolfram Cloud and third-party services",
       "dangerous": true
+    },
+    "system_mutation": {
+      "description": "Modify global kernel state: options, attributes, protection, message suppression",
+      "dangerous": true
     }
   }
 }

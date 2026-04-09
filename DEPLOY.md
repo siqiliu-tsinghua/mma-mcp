@@ -1,10 +1,12 @@
 # mma-mcp VPS 部署指南
 
+> **使用场景：** 本指南面向已持有 Wolfram Engine / Mathematica 许可证的个人用户，帮助你将本地 Wolfram 内核通过 HTTPS 挂载到自己的网页版和移动版 AI 客户端（如 Claude.ai、ChatGPT），以便在任何设备上使用 Wolfram 计算能力。部署后的服务仅供许可证持有者本人使用。是否可用于其他场景，请自行根据你的 Wolfram 许可证条款确认。
+
 > **适用平台：** 本指南针对 **Debian / Ubuntu** 系 Linux。其他发行版的包名和 systemd 细节可能不同，欢迎贡献适配文档（见 [CONTRIBUTING.md](CONTRIBUTING.md)）。
 
 ## 前置条件
 
-- Debian / Ubuntu VPS，已安装 Mathematica 14.3
+- Debian / Ubuntu VPS，已持有并安装 Wolfram Engine / Mathematica 14.3
 - 阿里云域名 + RAM 子账号（AliyunDNSFullAccess 权限）
 - 80/443 端口可用
 
@@ -83,7 +85,7 @@ mma-mcp 支持两种 HTTP 认证模式，按需选择：
 
 **模式 A：多客户端 OAuth（推荐）**
 
-适用于 Claude.ai、ChatGPT 等支持 OAuth 的 Web 客户端，以及需要多用户/多角色的场景。
+适用于同时从多个 AI 客户端（如 Claude.ai 和 ChatGPT）访问同一台机器上的 Wolfram 内核。每个客户端有独立的凭据和可选的权限策略。
 
 ```toml
 [auth]
@@ -95,7 +97,7 @@ password_hash = "scrypt:..."   # 用 mma-mcp hash-password 生成
 
 [auth.roles.default]
 tools = "*"
-security = "inherit"
+security = ""  # 空字符串 = 继承全局安全策略
 ```
 
 生成客户端配置片段：

@@ -144,7 +144,7 @@ mma-mcp 是一个 [Model Context Protocol (MCP)](https://modelcontextprotocol.io
 
 **已知局限**：动态字符串拼接构造符号名（如 `ToExpression["Ru" <> "n"]`）无法被静态分析捕获。因此 `ToExpression` 本身被归入 `dynamic_eval` 危险组，默认阻断。
 
-### 2. 无状态 Worker 池（内核进程级隔离）
+### 2. Worker 池（内核进程级隔离）
 
 借鉴 Apache prefork MPM，`KernelPool`（`pool.py`）维护多个独立的 `KernelSession` worker 进程，每次工具调用独占一个 worker，用完清理归还。
 
@@ -155,18 +155,18 @@ mma-mcp 是一个 [Model Context Protocol (MCP)](https://modelcontextprotocol.io
        → release 归还池
 ```
 
-**为什么不用单内核 + context 分区？** `Block[{$Context}]` 只改变默认符号命名空间，不阻止跨 context 访问。恶意客户端可通过 `Contexts[]`/`Names[]` 发现其他客户端的变量，通过 `UpValues` 注入修改其他客户端的函数行为。进程级隔离从根本上消除这一攻击面。
+**为什么不用单内核 + context 分区？** `Block[{$Context}]` 只改变默认符号命名空间，不阻止跨 context 访问。进程级隔离从根本上消除跨客户端符号空间的攻击面。
 
 **池行为**：
 - **懒创建**：启动时只创建 `pool_min_idle`（默认 1）个 worker，并发请求到来时按需扩到 `pool_size`
 - **独占使用**：每次工具调用从池中 acquire 一个空闲 worker，评估期间其他请求不能共享该 worker
 - **调用清理**：每次调用用随机临时上下文 `Pool$<hex>`，执行后 `Remove["Pool$...`*"]`
-- **定期重启**：worker 处理 `max_requests_per_worker`（默认 100）次后重启内核进程，兜底清理内存膨胀
+- **定期重启**：worker 处理 `max_requests_per_worker`（默认 100）次后重启内核进程，兜底重置所有内核状态
 - **空闲回收**：超过 `pool_min_idle` 的空闲 worker 在 idle timeout 后关闭
 
 **内存实测**：空闲 WolframKernel 进程 RSS 仅 10-20MB，中度使用 ~200MB，重度可达 ~800MB。池大小默认 4（`min(cpu_count, 4)`），空闲状态总开销 < 100MB。
 
-**无状态设计**：AI 客户端天然擅长生成自包含表达式（`Module`/`With`/`Block` 封装局部状态），不需要跨调用变量持久化。
+**隔离边界**：临时上下文清理覆盖用户定义的符号。`System\`` 级别的状态修改（如 `SetOptions`、`Unprotect`）由安全过滤器的 `system_mutation` 危险组在前端阻断，`max_requests_per_worker` 定期重启作为兜底。
 
 ### 3. 配置驱动而非代码驱动
 
@@ -213,11 +213,11 @@ Layer 3: 表达式过滤 (security/)
 
 ### 符号分组
 
-28 个预定义分组（基于 WolframLanguageData FunctionalityAreas），分为安全和危险两类：
+29 个预定义分组（基于 WolframLanguageData FunctionalityAreas），分为安全和危险两类：
 
 **安全（22 组，默认允许）**：math_core, algebra, calculus, linear_algebra, statistics, number_theory, combinatorics, data_structures, programming, visualization, graph_theory, geometry, optimization, signal_processing, image, machine_learning, chemistry_biology, quantitative, compile, crypto, fractal, interpolation
 
-**危险（6 组，默认阻断）**：system_exec, dynamic_eval, file_write, file_read, networking, external_services
+**危险（7 组，默认阻断）**：system_exec, dynamic_eval, file_write, file_read, networking, external_services, system_mutation
 
 ### 两种过滤模式
 

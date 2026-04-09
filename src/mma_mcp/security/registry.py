@@ -30,6 +30,7 @@ _DEFAULT_BLACKLIST_GROUPS = [
     "file_write",
     "networking",
     "external_services",
+    "system_mutation",
 ]
 
 # Default whitelist-mode groups — allowed out of the box
@@ -62,6 +63,7 @@ _DEFAULT_WHITELIST_GROUPS = [
 _DANGEROUS_GROUPS = [
     "system_exec", "dynamic_eval", "file_write",
     "networking", "external_services", "file_read",
+    "system_mutation",
 ]
 
 

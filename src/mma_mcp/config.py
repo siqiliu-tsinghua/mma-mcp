@@ -88,6 +88,7 @@ class SecurityConfig:
     deny_groups: list[str] = field(default_factory=lambda: [
         "system_exec", "dynamic_eval", "file_write",
         "file_read", "networking", "external_services",
+        "system_mutation",
     ])
     allow_groups: list[str] = field(default_factory=list)
     extra_blocked: list[str] = field(default_factory=list)
@@ -511,6 +512,7 @@ deny_groups = [
     "file_read",
     "networking",
     "external_services",
+    "system_mutation",
 ]
 
 # Whitelist mode: only these groups' symbols are allowed.

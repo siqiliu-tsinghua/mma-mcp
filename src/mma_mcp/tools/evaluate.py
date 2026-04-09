@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from mcp.server.fastmcp import Image
 
+from mma_mcp.security.filter import SecurityError
 from mma_mcp.tools import ToolContext, register
+
+_ALLOWED_FORMS = frozenset({
+    "TeXForm", "OutputForm", "InputForm", "StandardForm", "TraditionalForm",
+})
 
 
 @register("evaluate")
@@ -18,6 +23,11 @@ def evaluate(ctx: ToolContext, expression: str, form: str = "") -> str:
     """
     ctx.check(expression)
     fmt = form or ctx.default_format
+    if fmt not in _ALLOWED_FORMS:
+        raise SecurityError(
+            f"Invalid output form {fmt!r}. "
+            f"Allowed: {', '.join(sorted(_ALLOWED_FORMS))}"
+        )
     with ctx.pool.worker() as (kernel, wl_context):
         result = kernel.evaluate_to_string(
             expression, fmt,

@@ -39,9 +39,9 @@ mma-mcp/
 │       │   ├── filter.py          # ExpressionFilter: regex symbol extraction + policy check
 │       │   ├── registry.py        # CapabilityRegistry: load groups, build filters
 │       │   └── groups/            # Pre-generated JSON symbol lists per group
-│       │       ├── manifest.json  # Group metadata (28 groups: 22 safe + 6 dangerous)
+│       │       ├── manifest.json  # Group metadata (29 groups: 22 safe + 7 dangerous)
 │       │       ├── math_core.json, algebra.json, ...  # 22 safe groups
-│       │       ├── system_exec.json, file_read.json, ...  # 6 dangerous groups
+│       │       ├── system_exec.json, file_read.json, ...  # 7 dangerous groups
 │       │       └── (regenerate via: mma-mcp setup)
 │       └── tools/
 │           ├── __init__.py        # Tool registry, ToolContext, RoleRuntime, RBAC wrapper
@@ -79,11 +79,11 @@ Layer 3: Expression filtering (security/)
 ### Key design decisions
 
 - **Pre-kernel filtering:** Expressions are filtered in Python (regex symbol extraction) before the kernel sees them. The kernel only receives policy-compliant code.
-- **Worker pool isolation:** Each tool call acquires an exclusive kernel worker from a pool (`KernelPool`). Workers are stateless — a temporary WL context is used per call and cleaned up on release. This provides process-level isolation between concurrent clients (no cross-client `Contexts[]`/`Names[]`/`UpValues` attacks). Pool supports lazy creation, idle reclaim, and periodic worker restart.
+- **Worker pool isolation:** Each tool call acquires an exclusive kernel worker from a pool (`KernelPool`). A temporary WL context is used per call and cleaned up on release. This provides process-level isolation between concurrent clients. Pool supports lazy creation, idle reclaim, and periodic worker restart.
 - **Two-layer timeout:** WL-side `TimeConstrained` (cooperative) + Python-side `ThreadPoolExecutor` hard timeout (force-restart on stuck kernel).
 - **Config-driven:** All behavior controlled via `mma_mcp.toml`. Tools, security policy, auth, resource limits — all configurable without code changes.
 - **Contextvar-based RBAC:** `current_client` and `_active_filter` contextvars propagate per-request identity and security policy, concurrent-safe.
-- **Stateless evaluation:** Each tool call uses a temporary WL context (`Pool$<random>\``) that is cleaned up after execution. AI clients generate self-contained expressions (using `Module`/`With`/`Block` for local state).
+- **Per-call evaluation:** Each tool call uses a temporary WL context (`Pool$<random>\``) that is cleaned up after execution. AI clients generate self-contained expressions (using `Module`/`With`/`Block` for local state). System-level mutation (`SetOptions`, `Unprotect`, etc.) is blocked by the `system_mutation` security group.
 
 ## Security Architecture
 
@@ -99,10 +99,10 @@ Multi-pass regex tokenizer:
 
 ### Capability groups (security/groups/)
 
-28 groups derived from WolframLanguageData FunctionalityAreas + hard-coded dangerous seeds:
+29 groups derived from WolframLanguageData FunctionalityAreas + hard-coded dangerous seeds:
 
 - **Safe (22):** math_core, algebra, calculus, linear_algebra, statistics, number_theory, combinatorics, data_structures, programming, visualization, graph_theory, geometry, optimization, signal_processing, image, machine_learning, chemistry_biology, quantitative, compile, crypto, fractal, interpolation
-- **Dangerous (6):** system_exec, dynamic_eval, file_read, file_write, networking, external_services
+- **Dangerous (7):** system_exec, dynamic_eval, file_read, file_write, networking, external_services, system_mutation
 
 ### Security modes
 

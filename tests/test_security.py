@@ -111,6 +111,23 @@ class TestExtractSymbols:
         syms = extract_symbols("(**) Sin[x]")
         assert "Sin" in syms
 
+    # --- Context-qualified Symbol["..."] (Critical 1 regression) ---
+
+    def test_symbol_call_context_qualified(self):
+        """Symbol["System`Run"] must extract Run."""
+        syms = extract_symbols('Symbol["System`Run"]')
+        assert "Run" in syms
+
+    def test_symbol_call_nested_context(self):
+        """Symbol["Developer`PackedArray`Internal`Func"] → Func."""
+        syms = extract_symbols('Symbol["Developer`PackedArray`Internal`Func"]')
+        assert "Func" in syms
+
+    def test_symbol_call_no_context(self):
+        """Symbol["Run"] still works (no context prefix)."""
+        syms = extract_symbols('Symbol["Run"]')
+        assert "Run" in syms
+
 
 # ===================================================================
 # ExpressionFilter — blacklist mode
@@ -151,6 +168,16 @@ class TestBlacklistFilter:
     def test_context_qualified_blocked(self, filt):
         with pytest.raises(SecurityError, match="Run"):
             filt.check("System`Run[\"cmd\"]")
+
+    def test_dynamic_symbol_context_qualified_blocked(self, filt):
+        """Symbol["System`Run"] must be blocked — Critical 1 regression."""
+        with pytest.raises(SecurityError, match="Run"):
+            filt.check('Symbol["System`Run"]')
+
+    def test_dynamic_symbol_setdirectory_blocked(self, filt):
+        filt2 = ExpressionFilter("blacklist", frozenset({"SetDirectory"}))
+        with pytest.raises(SecurityError, match="SetDirectory"):
+            filt2.check('Symbol["System`SetDirectory"]["/tmp"]')
 
     def test_string_contents_not_blocked(self, filt):
         # "Run" only appears inside a string literal
@@ -241,9 +268,18 @@ class TestCapabilityRegistry:
 
     def test_default_blacklist_blocks_dangerous(self, registry):
         """Default SecurityConfig should block dangerous symbols."""
-        config = SecurityConfig()  # defaults: blacklist + all 6 dangerous groups
+        config = SecurityConfig()  # defaults: blacklist + all 7 dangerous groups
         filt = registry.build_filter(config)
         for sym in ("Run", "RunProcess", "DeleteFile", "URLRead", "ToExpression"):
+            with pytest.raises(SecurityError):
+                filt.check(f"{sym}[x]")
+
+    def test_default_blacklist_blocks_system_mutation(self, registry):
+        """Default blacklist should block system state mutation symbols."""
+        config = SecurityConfig()
+        filt = registry.build_filter(config)
+        for sym in ("SetOptions", "SetSystemOptions", "Unprotect", "Off",
+                     "SetAttributes", "TagSet", "UpSet", "ClearAll"):
             with pytest.raises(SecurityError):
                 filt.check(f"{sym}[x]")
 

@@ -26,8 +26,10 @@ _RE_STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
 # e.g. "System`Run", "Run", "$HomeDirectory", "Global`myFunc"
 _RE_SYMBOL = re.compile(r'[A-Za-z$][A-Za-z0-9$]*(?:`[A-Za-z$][A-Za-z0-9$]*)*')
 
-# Matches Symbol["SomeName"] — dynamic symbol construction
-_RE_SYMBOL_CALL = re.compile(r'\bSymbol\s*\[\s*"([A-Za-z$][A-Za-z0-9$]*)"\s*\]')
+# Matches Symbol["SomeName"] or Symbol["Context`SomeName"] — dynamic symbol construction
+_RE_SYMBOL_CALL = re.compile(
+    r'\bSymbol\s*\[\s*"((?:[A-Za-z$][A-Za-z0-9$]*`)*[A-Za-z$][A-Za-z0-9$]*)"\s*\]'
+)
 
 # Matches << operator (syntactic sugar for Get["file"])
 _RE_GET_OPERATOR = re.compile(r'<<')
@@ -69,7 +71,8 @@ def extract_symbols(expr: str) -> set[str]:
     Symbol["Name"] patterns are treated as direct symbol references.
     """
     # Collect Symbol["X"] references before stripping strings/comments
-    dynamic = {m.group(1) for m in _RE_SYMBOL_CALL.finditer(expr)}
+    # Normalize context-qualified names: Symbol["System`Run"] → "Run"
+    dynamic = {_short_name(m.group(1)) for m in _RE_SYMBOL_CALL.finditer(expr)}
 
     # << operator is syntactic sugar for Get — inject "Get" into symbol set
     if _RE_GET_OPERATOR.search(expr):

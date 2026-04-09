@@ -243,12 +243,10 @@ class TestOAuthClientValidation:
         defaults.update(kwargs)
         return defaults
 
-    @pytest.mark.asyncio
-    async def test_unregistered_client_rejected(self, srv):
+    def test_unregistered_client_rejected(self, srv):
         """Authorization must reject an unknown client_id."""
         from starlette.testclient import TestClient
         from starlette.applications import Starlette
-        from starlette.routing import Route
 
         app = Starlette(routes=srv.routes())
         client = TestClient(app, raise_server_exceptions=False)
@@ -258,8 +256,7 @@ class TestOAuthClientValidation:
         assert resp.status_code == 400
         assert "Unknown client_id" in resp.text
 
-    @pytest.mark.asyncio
-    async def test_wrong_redirect_uri_rejected(self, srv):
+    def test_wrong_redirect_uri_rejected(self, srv):
         """Authorization must reject a redirect_uri not in the client's registered list."""
         from starlette.testclient import TestClient
         from starlette.applications import Starlette
@@ -273,8 +270,7 @@ class TestOAuthClientValidation:
         assert resp.status_code == 400
         assert "redirect_uri not registered" in resp.text
 
-    @pytest.mark.asyncio
-    async def test_valid_client_and_redirect_succeeds(self, srv):
+    def test_valid_client_and_redirect_succeeds(self, srv):
         """A registered client with matching redirect_uri should get a redirect."""
         from starlette.testclient import TestClient
         from starlette.applications import Starlette
@@ -288,8 +284,7 @@ class TestOAuthClientValidation:
         assert resp.status_code == 302
         assert "code=" in resp.headers["location"]
 
-    @pytest.mark.asyncio
-    async def test_pkce_required(self, srv):
+    def test_pkce_required(self, srv):
         """PKCE code_challenge must be present (OAuth 2.1)."""
         from starlette.testclient import TestClient
         from starlette.applications import Starlette

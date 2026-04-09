@@ -392,3 +392,38 @@ class TestRoleResourceLimits:
             assert "[Truncated" in result
         finally:
             current_client.reset(tok)
+
+
+# ===================================================================
+# evaluate form whitelist (Critical 2 regression)
+# ===================================================================
+
+class TestFormWhitelist:
+
+    def test_allowed_forms_pass(self):
+        from mma_mcp.tools.evaluate import _ALLOWED_FORMS, evaluate
+        ctx = _make_ctx()
+        for form in _ALLOWED_FORMS:
+            # Should not raise SecurityError; kernel mock returns "42"
+            result = evaluate(ctx, "1+1", form=form)
+            assert isinstance(result, str)
+
+    def test_default_form_passes(self):
+        from mma_mcp.tools.evaluate import evaluate
+        ctx = _make_ctx()
+        result = evaluate(ctx, "1+1")  # uses default
+        assert isinstance(result, str)
+
+    def test_malicious_form_blocked(self):
+        from mma_mcp.tools.evaluate import evaluate
+        from mma_mcp.security.filter import SecurityError
+        ctx = _make_ctx()
+        with pytest.raises(SecurityError, match="Invalid output form"):
+            evaluate(ctx, "1+1", form='(Run["ls"]; OutputForm)')
+
+    def test_arbitrary_form_blocked(self):
+        from mma_mcp.tools.evaluate import evaluate
+        from mma_mcp.security.filter import SecurityError
+        ctx = _make_ctx()
+        with pytest.raises(SecurityError, match="Invalid output form"):
+            evaluate(ctx, "1+1", form="MyCustomForm")
