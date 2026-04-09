@@ -1,8 +1,10 @@
 # mma-mcp VPS 部署指南
 
+> **适用平台：** 本指南针对 **Debian / Ubuntu** 系 Linux。其他发行版的包名和 systemd 细节可能不同，欢迎贡献适配文档（见 [CONTRIBUTING.md](CONTRIBUTING.md)）。
+
 ## 前置条件
 
-- Debian VPS，已安装 Mathematica 14.3
+- Debian / Ubuntu VPS，已安装 Mathematica 14.3
 - 阿里云域名 + RAM 子账号（AliyunDNSFullAccess 权限）
 - 80/443 端口可用
 
@@ -296,6 +298,99 @@ sudo journalctl -u caddy-mma --no-pager | tail -30
    - "计算 1+1"
    - "画出 Sin[x] 在 0 到 2π 的图像"
    - "求解 x^2 - 5x + 6 = 0"
+
+---
+
+## 十、fail2ban 防护（可选）
+
+用 fail2ban 在 IP 层封禁路径扫描器和登录暴力破解。需要两个 filter：
+
+### 安装
+
+```bash
+sudo apt-get install -y fail2ban
+```
+
+### Filter 1：路径扫描检测
+
+检测对无效路径的探测（`/admin`、`/.env`、`/wp-login.php` 等），排除所有合法端点。
+
+```bash
+sudo tee /etc/fail2ban/filter.d/mma-mcp-probe.conf > /dev/null << 'EOF'
+[Definition]
+datepattern = {NONE}
+
+# 匹配 uvicorn access log 中非合法路径的 401/403/404 响应
+# 排除: /, /mcp, /oauth/*, /.well-known/*, /favicon.ico
+failregex = ^.*\b<HOST>(?::\d+)?\s+-\s+"[A-Z]+\s+/(?!(?:$|mcp(?:[/? ]|$)|oauth[/? ]|\.well-known[/? ]|favicon\.ico(?:[? ]|$)))\S+\s+HTTP/\d(?:\.\d+)?"\s+(?:401|403|404)\b
+
+ignoreregex =
+EOF
+```
+
+### Filter 2：登录暴力破解检测
+
+匹配应用层输出的 `AUTH_FAIL` 日志（包含客户端 IP）。
+
+```bash
+sudo tee /etc/fail2ban/filter.d/mma-mcp-auth.conf > /dev/null << 'EOF'
+[Definition]
+datepattern = {NONE}
+
+failregex = AUTH_FAIL ip=<HOST>\s
+
+ignoreregex =
+EOF
+```
+
+### Jail 配置
+
+```bash
+sudo tee /etc/fail2ban/jail.d/mma-mcp.local > /dev/null << 'EOF'
+# 路径扫描：5 次 404 → ban 12 小时
+[mma-mcp-probe]
+enabled   = true
+backend   = systemd
+journalmatch = _SYSTEMD_UNIT=mma-mcp.service
+filter    = mma-mcp-probe
+banaction = nftables[type=allports]
+protocol  = tcp
+findtime  = 10m
+maxretry  = 5
+bantime   = 12h
+
+# 登录暴力破解：5 次失败 → ban 1 小时
+[mma-mcp-auth]
+enabled   = true
+backend   = systemd
+journalmatch = _SYSTEMD_UNIT=mma-mcp.service
+filter    = mma-mcp-auth
+banaction = nftables[type=allports]
+protocol  = tcp
+findtime  = 10m
+maxretry  = 5
+bantime   = 1h
+EOF
+```
+
+### 启用
+
+```bash
+sudo systemctl enable --now fail2ban
+sudo fail2ban-client reload
+
+# 检查 jail 状态
+sudo fail2ban-client status mma-mcp-probe
+sudo fail2ban-client status mma-mcp-auth
+
+# 手动解封 IP（如有误封）
+sudo fail2ban-client set mma-mcp-probe unbanip <IP>
+```
+
+> **说明：** 应用层已有指数退避防护（5 次失败后逐步加锁到最长 15 分钟），
+> fail2ban 是第二层防线，直接在网络层丢弃恶意 IP 的所有流量。
+> 登录 jail 的 `bantime` 设为 1 小时（比扫描的 12 小时短），
+> 因为合法用户输错密码的概率更高。
 
 ---
 

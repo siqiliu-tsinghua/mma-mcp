@@ -329,6 +329,8 @@ class OAuthServer:
         # Authenticate
         client_name, role, err = self._check_credentials(form)
         if err:
+            peer = request.client.host if request.client else "unknown"
+            logger.warning("AUTH_FAIL ip=%s user=%s reason=%s", peer, form.get("username", ""), err)
             hidden = self._build_hidden_fields(form)
             return HTMLResponse(
                 self._render_login(hidden_fields=hidden, error=err),

@@ -70,15 +70,19 @@ mma-mcp 是一个 [Model Context Protocol (MCP)](https://modelcontextprotocol.io
 │         └────────────┬────────────┘                     │
 │                      │  clean expression                │
 │              ┌───────▼───────┐                          │
-│              │ KernelSession │  WolframLanguageSession   │
-│              │ (persistent)  │  auto-restart on crash    │
+│              │  KernelPool   │  无状态 worker 池         │
+│              │  (pool.py)    │  进程级隔离               │
 │              └───────┬───────┘                          │
-│                      │                                  │
+│                      │  acquire → execute → release     │
 └──────────────────────┼──────────────────────────────────┘
                        │
+          ┌────────────▼────────────┐
+          │ Worker 1 ... Worker N   │  独立 KernelSession
+          │ (auto-restart, 定期回收) │
+          └────────────┬────────────┘
+                       │
                ┌───────▼───────┐
-               │ Wolfram Engine │  本地内核进程
-               │ (MathKernel)  │
+               │ Wolfram Engine │  MathKernel × N
                └───────────────┘
 ```
 
@@ -92,7 +96,8 @@ mma-mcp 是一个 [Model Context Protocol (MCP)](https://modelcontextprotocol.io
 |------|------|------|
 | **Server** | `server.py` | `App` 类封装服务器全生命周期；CLI 入口 (`main`)；argparse 子命令；HTTP/stdio 启动 |
 | **Config** | `config.py` | TOML 配置加载/校验/默认值生成；所有 dataclass 定义（Kernel/Server/TLS/Security/Tools/Auth/Role/Client） |
-| **Kernel** | `kernel.py` | `KernelSession` 管理 Wolfram 内核生命周期；自动探测内核路径；崩溃自动重启；Python 侧硬超时（内核卡死时强制重启） |
+| **Kernel** | `kernel.py` | `KernelSession` 管理单个 Wolfram 内核生命周期；自动探测内核路径；崩溃自动重启；Python 侧硬超时 |
+| **Pool** | `pool.py` | `KernelPool` 无状态 worker 池；懒创建、独占使用、临时上下文清理、定期重启、空闲回收 |
 
 ### 安全模块
 
@@ -107,7 +112,7 @@ mma-mcp 是一个 [Model Context Protocol (MCP)](https://modelcontextprotocol.io
 | 模块 | 文件 | 职责 |
 |------|------|------|
 | **Auth** | `auth.py` | `BearerAuthMiddleware`：Bearer token 验证；`ClientIdentity` + `current_client` contextvar 传递客户端身份 |
-| **OAuth** | `oauth.py` | 最小 OAuth 2.1 服务器：元数据发现、DCR、Authorization Code + PKCE；多客户端/单密码双模式登录页 |
+| **OAuth** | `oauth.py` | 最小 OAuth 2.1 服务器：元数据发现、DCR、Authorization Code + PKCE；多客户端/单密码双模式；token 和 DCR 客户端持久化到 SQLite（WAL 模式） |
 | **Passwords** | `passwords.py` | `hash_password` / `verify_password`：stdlib `hashlib.scrypt`，零外部依赖 |
 
 ### 工具模块
@@ -139,16 +144,29 @@ mma-mcp 是一个 [Model Context Protocol (MCP)](https://modelcontextprotocol.io
 
 **已知局限**：动态字符串拼接构造符号名（如 `ToExpression["Ru" <> "n"]`）无法被静态分析捕获。因此 `ToExpression` 本身被归入 `dynamic_eval` 危险组，默认阻断。
 
-### 2. 内核会话管理
+### 2. 无状态 Worker 池（内核进程级隔离）
 
-**当前实现**：单个长生命周期的 `WolframLanguageSession`，多客户端通过 `Block[{$Context}]` 做命名空间分区。
+借鉴 Apache prefork MPM，`KernelPool`（`pool.py`）维护多个独立的 `KernelSession` worker 进程，每次工具调用独占一个 worker，用完清理归还。
 
-- **原因**：Wolfram 内核启动需要 3-5 秒，频繁启动不可接受。
-- **缓解**：内核崩溃自动重启；内核懒启动（首次工具调用时才启动）。
+```
+工具调用 → pool.worker() acquire → 独占 KernelSession
+       → 临时上下文 Pool$<random>` 内执行
+       → Remove["Pool$...`*"] 清理
+       → release 归还池
+```
 
-**已知安全局限**：当前的 context 命名空间隔离不提供访问控制——恶意客户端可通过 `Contexts[]`/`Names[]` 发现并篡改其他客户端的变量，或通过 UpValues 注入修改其他客户端的函数行为。
+**为什么不用单内核 + context 分区？** `Block[{$Context}]` 只改变默认符号命名空间，不阻止跨 context 访问。恶意客户端可通过 `Contexts[]`/`Names[]` 发现其他客户端的变量，通过 `UpValues` 注入修改其他客户端的函数行为。进程级隔离从根本上消除这一攻击面。
 
-**演进方向（已设计，待实现）**：无状态 Worker 池。借鉴 Apache prefork MPM，维护多个独立内核进程，每次工具调用独占一个 worker，用完清理归还。池支持懒创建、空闲回收、定期重启（防内存膨胀）。详见 TODO.md「内核 Worker 池」章节。
+**池行为**：
+- **懒创建**：启动时只创建 `pool_min_idle`（默认 1）个 worker，并发请求到来时按需扩到 `pool_size`
+- **独占使用**：每次工具调用从池中 acquire 一个空闲 worker，评估期间其他请求不能共享该 worker
+- **调用清理**：每次调用用随机临时上下文 `Pool$<hex>`，执行后 `Remove["Pool$...`*"]`
+- **定期重启**：worker 处理 `max_requests_per_worker`（默认 100）次后重启内核进程，兜底清理内存膨胀
+- **空闲回收**：超过 `pool_min_idle` 的空闲 worker 在 idle timeout 后关闭
+
+**内存实测**：空闲 WolframKernel 进程 RSS 仅 10-20MB，中度使用 ~200MB，重度可达 ~800MB。池大小默认 4（`min(cpu_count, 4)`），空闲状态总开销 < 100MB。
+
+**无状态设计**：AI 客户端天然擅长生成自包含表达式（`Module`/`With`/`Block` 封装局部状态），不需要跨调用变量持久化。
 
 ### 3. 配置驱动而非代码驱动
 
@@ -270,7 +288,9 @@ Layer 3: 表达式过滤 (security/)
    @register("my_tool")
    def my_tool(ctx: ToolContext, expression: str) -> str:
        ctx.check(expression)  # 安全过滤
-       return ctx.kernel.evaluate_to_string(expression, ctx.default_format, timeout=ctx.timeout)
+       with ctx.pool.worker() as (kernel, wl_context):
+           return kernel.evaluate_to_string(expression, ctx.default_format,
+                                            timeout=ctx.timeout, context=wl_context)
    ```
 2. 在 `tools/__init__.py` 的 `register_tools` 中导入该模块。
 3. 在 `mma_mcp.toml` 的 `[tools] enabled` 中添加 `"my_tool"`。
