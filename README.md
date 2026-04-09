@@ -102,7 +102,7 @@ Expressions are filtered **before** reaching the Wolfram kernel. Symbols are ext
 
 **Whitelist mode**: only allows symbols from explicitly enabled groups.
 
-28 capability groups (22 safe + 6 dangerous) cover ~6000 Wolfram Language symbols. Regenerate from your local kernel:
+29 capability groups (22 safe + 7 dangerous) cover ~6000 Wolfram Language symbols. Regenerate from your local kernel:
 
 ```bash
 uv run mma-mcp setup          # skip if groups already exist

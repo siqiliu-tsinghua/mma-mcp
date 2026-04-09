@@ -593,9 +593,21 @@ class OAuthServer:
 
     @staticmethod
     def _base_url(request: Request) -> str:
-        """Derive the public base URL from the request."""
-        scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
-        host = request.headers.get("x-forwarded-host", request.headers.get("host", ""))
+        """Derive the public base URL from the request.
+
+        Only trust ``x-forwarded-*`` headers when the immediate client is on
+        the loopback interface (i.e. behind a local reverse proxy like Caddy).
+        This prevents spoofing when the server is directly exposed.
+        """
+        client_ip = request.client.host if request.client else ""
+        trust_proxy = client_ip in ("127.0.0.1", "::1")
+        if trust_proxy:
+            scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+            host = request.headers.get("x-forwarded-host",
+                                       request.headers.get("host", ""))
+        else:
+            scheme = request.url.scheme
+            host = request.headers.get("host", "")
         return f"{scheme}://{host}"
 
 

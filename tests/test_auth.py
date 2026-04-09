@@ -243,58 +243,48 @@ class TestOAuthClientValidation:
         defaults.update(kwargs)
         return defaults
 
-    def test_unregistered_client_rejected(self, srv):
-        """Authorization must reject an unknown client_id."""
-        from starlette.testclient import TestClient
+    @pytest.fixture
+    def client(self, srv):
+        """httpx async client with ASGITransport (avoids TestClient event-loop hang)."""
+        import httpx
         from starlette.applications import Starlette
 
         app = Starlette(routes=srv.routes())
-        client = TestClient(app, raise_server_exceptions=False)
+        transport = httpx.ASGITransport(app=app)  # type: ignore[arg-type]
+        return httpx.AsyncClient(transport=transport, base_url="http://testserver")
 
+    @pytest.mark.asyncio
+    async def test_unregistered_client_rejected(self, srv, client):
+        """Authorization must reject an unknown client_id."""
         form = self._make_form(client_id="not-registered")
-        resp = client.post("/oauth/authorize", data=form, follow_redirects=False)
+        resp = await client.post("/oauth/authorize", data=form, follow_redirects=False)
         assert resp.status_code == 400
         assert "Unknown client_id" in resp.text
 
-    def test_wrong_redirect_uri_rejected(self, srv):
+    @pytest.mark.asyncio
+    async def test_wrong_redirect_uri_rejected(self, srv, client):
         """Authorization must reject a redirect_uri not in the client's registered list."""
-        from starlette.testclient import TestClient
-        from starlette.applications import Starlette
-
         self._register_client(srv, ["https://example.com/callback"])
-        app = Starlette(routes=srv.routes())
-        client = TestClient(app, raise_server_exceptions=False)
-
         form = self._make_form(redirect_uri="https://evil.com/steal")
-        resp = client.post("/oauth/authorize", data=form, follow_redirects=False)
+        resp = await client.post("/oauth/authorize", data=form, follow_redirects=False)
         assert resp.status_code == 400
         assert "redirect_uri not registered" in resp.text
 
-    def test_valid_client_and_redirect_succeeds(self, srv):
+    @pytest.mark.asyncio
+    async def test_valid_client_and_redirect_succeeds(self, srv, client):
         """A registered client with matching redirect_uri should get a redirect."""
-        from starlette.testclient import TestClient
-        from starlette.applications import Starlette
-
         self._register_client(srv, ["https://example.com/callback"])
-        app = Starlette(routes=srv.routes())
-        client = TestClient(app, raise_server_exceptions=False)
-
         form = self._make_form()
-        resp = client.post("/oauth/authorize", data=form, follow_redirects=False)
+        resp = await client.post("/oauth/authorize", data=form, follow_redirects=False)
         assert resp.status_code == 302
         assert "code=" in resp.headers["location"]
 
-    def test_pkce_required(self, srv):
+    @pytest.mark.asyncio
+    async def test_pkce_required(self, srv, client):
         """PKCE code_challenge must be present (OAuth 2.1)."""
-        from starlette.testclient import TestClient
-        from starlette.applications import Starlette
-
         self._register_client(srv)
-        app = Starlette(routes=srv.routes())
-        client = TestClient(app, raise_server_exceptions=False)
-
         form = self._make_form(code_challenge="")
-        resp = client.post("/oauth/authorize", data=form, follow_redirects=False)
+        resp = await client.post("/oauth/authorize", data=form, follow_redirects=False)
         assert resp.status_code == 400
         assert "PKCE" in resp.text
 
