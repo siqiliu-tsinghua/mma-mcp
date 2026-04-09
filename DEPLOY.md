@@ -7,8 +7,8 @@
 ## Prerequisites
 
 - Debian / Ubuntu VPS with Wolfram Engine / Mathematica 14.3 installed and licensed
-- A domain name with DNS API access (e.g., Alibaba Cloud DNS with RAM sub-account and AliyunDNSFullAccess permission)
-- Ports 80/443 available
+- A domain name pointing to your VPS
+- Port 443 available (and port 80 if using HTTP-01 challenge)
 
 ---
 
@@ -76,7 +76,54 @@ port = 8000
 [tls]
 enabled = true
 domain = "mma.yourdomain.com"
+# dns_provider = ""  # see "TLS Certificate" section below
+```
+
+### TLS Certificate
+
+Caddy automatically obtains Let's Encrypt certificates. Two ACME challenge modes are available:
+
+**HTTP-01 challenge (simplest)**
+
+No DNS provider needed. Caddy validates domain ownership via port 80. Just leave `dns_provider` empty:
+
+```toml
+[tls]
+enabled = true
+domain = "mma.yourdomain.com"
+# dns_provider not set -> HTTP-01 challenge (port 80 must be open)
+```
+
+No custom Caddy build required — the stock Caddy binary works. Skip to "Generate Caddyfile" below.
+
+**DNS-01 challenge (no port 80 needed)**
+
+Caddy validates domain ownership via DNS API. Useful when port 80 is blocked or you want wildcard certificates. Requires a custom Caddy build with your DNS provider plugin.
+
+Supported DNS providers:
+
+| Provider | `dns_provider` value | Environment variables |
+|----------|---------------------|-----------------------|
+| Alibaba Cloud DNS | `alidns` | `ALIDNS_ACCESS_KEY_ID`, `ALIDNS_ACCESS_KEY_SECRET` |
+| Cloudflare | `cloudflare` | `CLOUDFLARE_API_TOKEN` |
+| DNSPod (Tencent Cloud) | `dnspod` | `DNSPOD_API_TOKEN` |
+| GoDaddy | `godaddy` | `GODADDY_API_KEY`, `GODADDY_API_SECRET` |
+| Namecheap | `namecheap` | `NAMECHEAP_API_KEY`, `NAMECHEAP_API_USER` |
+
+Example with Alibaba Cloud DNS:
+
+```toml
+[tls]
+enabled = true
+domain = "mma.yourdomain.com"
 dns_provider = "alidns"
+```
+
+### Generate Caddyfile
+
+```bash
+uv run mma-mcp caddyfile
+cat Caddyfile   # Review the output
 ```
 
 ### Authentication Mode
@@ -119,16 +166,20 @@ auth_token_env = "MMA_MCP_AUTH_TOKEN"   # Read token from environment variable
 
 Web clients will still go through the OAuth flow, but the login page shows only a password field (the token is the password).
 
-### Generate Caddyfile
-
-```bash
-uv run mma-mcp caddyfile
-cat Caddyfile   # Review the output
-```
-
 ---
 
-## 4. Build Caddy (with DNS plugin)
+## 4. Install Caddy
+
+**HTTP-01 (stock Caddy):**
+
+```bash
+sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt-get update && sudo apt-get install -y caddy
+```
+
+**DNS-01 (custom build with DNS plugin):**
 
 ```bash
 # Install Go (if not already installed)
@@ -137,8 +188,13 @@ sudo apt-get install -y golang
 # Install xcaddy
 go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
 
-# Build Caddy with your DNS provider plugin
+# Build Caddy with your DNS provider plugin (example: alidns)
 ~/go/bin/xcaddy build --with github.com/caddy-dns/alidns
+# For other providers:
+#   --with github.com/caddy-dns/cloudflare
+#   --with github.com/caddy-dns/dnspod
+#   --with github.com/caddy-dns/godaddy
+#   --with github.com/caddy-dns/namecheap
 
 # Install to system path
 sudo mv caddy /usr/local/bin/
@@ -149,7 +205,9 @@ caddy version
 
 ## 5. Prepare Credentials
 
-**Mode A (multi-client OAuth):** Passwords are already hashed in the config file. The environment file only needs DNS credentials:
+The environment file contains secrets that systemd services read at startup.
+
+**If using DNS-01**, include your DNS provider's API credentials (example: alidns):
 
 ```bash
 sudo tee /etc/mma-mcp.env > /dev/null << EOF
@@ -159,18 +217,24 @@ EOF
 sudo chmod 600 /etc/mma-mcp.env
 ```
 
-**Mode B (static single token):** Also set the auth token:
+For other providers, use their respective environment variables (see the table in section 3).
+
+**If using HTTP-01**, the env file may be empty or contain only auth credentials:
+
+```bash
+sudo touch /etc/mma-mcp.env
+sudo chmod 600 /etc/mma-mcp.env
+```
+
+**If using static single token auth** (Mode B), also add the auth token:
 
 ```bash
 MMA_MCP_AUTH_TOKEN=$(openssl rand -hex 32)
 echo "Save this token for Claude Web configuration:"
 echo "$MMA_MCP_AUTH_TOKEN"
 
-sudo tee /etc/mma-mcp.env > /dev/null << EOF
-MMA_MCP_AUTH_TOKEN=$MMA_MCP_AUTH_TOKEN
-ALIDNS_ACCESS_KEY_ID=<your-access-key-id>
-ALIDNS_ACCESS_KEY_SECRET=<your-access-key-secret>
-EOF
+# Append to env file (or create it):
+echo "MMA_MCP_AUTH_TOKEN=$MMA_MCP_AUTH_TOKEN" | sudo tee -a /etc/mma-mcp.env > /dev/null
 sudo chmod 600 /etc/mma-mcp.env
 ```
 

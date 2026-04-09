@@ -7,8 +7,8 @@
 ## 前置条件
 
 - Debian / Ubuntu VPS，已持有并安装 Wolfram Engine / Mathematica 14.3
-- 阿里云域名 + RAM 子账号（AliyunDNSFullAccess 权限）
-- 80/443 端口可用
+- 一个指向 VPS 的域名
+- 443 端口可用（使用 HTTP-01 验证时还需要 80 端口）
 
 ---
 
@@ -38,8 +38,10 @@ uv run mma-mcp setup
 
 ## 二、域名 DNS
 
+在你的域名服务商控制台添加 A 记录，将子域名指向 VPS 公网 IP：
+
 ```bash
-# 在阿里云 DNS 控制台添加 A 记录：
+# 示例：
 #   主机记录: mma（或你喜欢的子域名）
 #   记录值:   <VPS 公网 IP>
 #   TTL:      600
@@ -76,7 +78,54 @@ port = 8000
 [tls]
 enabled = true
 domain = "mma.yourdomain.com"
+# dns_provider = ""  # 详见下方"TLS 证书"段落
+```
+
+### TLS 证书
+
+Caddy 自动获取 Let's Encrypt 证书，支持两种 ACME 验证方式：
+
+**HTTP-01 验证（最简单）**
+
+不需要 DNS 服务商 API，Caddy 通过 80 端口验证域名所有权。`dns_provider` 留空即可：
+
+```toml
+[tls]
+enabled = true
+domain = "mma.yourdomain.com"
+# dns_provider 不设置 → 使用 HTTP-01 验证（需要 80 端口开放）
+```
+
+不需要自定义构建 Caddy，直接安装官方版本即可。跳到下方"生成 Caddyfile"。
+
+**DNS-01 验证（不需要 80 端口）**
+
+Caddy 通过 DNS API 验证域名所有权。适用于 80 端口不可用或需要通配符证书的场景。需要带 DNS 插件的自定义 Caddy 构建。
+
+支持的 DNS 服务商：
+
+| 服务商 | `dns_provider` 值 | 环境变量 |
+|--------|-------------------|---------|
+| 阿里云 DNS | `alidns` | `ALIDNS_ACCESS_KEY_ID`, `ALIDNS_ACCESS_KEY_SECRET` |
+| Cloudflare | `cloudflare` | `CLOUDFLARE_API_TOKEN` |
+| DNSPod（腾讯云） | `dnspod` | `DNSPOD_API_TOKEN` |
+| GoDaddy | `godaddy` | `GODADDY_API_KEY`, `GODADDY_API_SECRET` |
+| Namecheap | `namecheap` | `NAMECHEAP_API_KEY`, `NAMECHEAP_API_USER` |
+
+以阿里云 DNS 为例：
+
+```toml
+[tls]
+enabled = true
+domain = "mma.yourdomain.com"
 dns_provider = "alidns"
+```
+
+### 生成 Caddyfile
+
+```bash
+uv run mma-mcp caddyfile
+cat Caddyfile   # 检查内容
 ```
 
 ### 认证模式选择
@@ -120,17 +169,20 @@ auth_token_env = "MMA_MCP_AUTH_TOKEN"   # 从环境变量读取 token
 
 Web 客户端连接时同样会走 OAuth 流程，但登录页面只显示密码字段（token 即密码）。
 
-生成 Caddyfile：
-
-```bash
-uv run mma-mcp caddyfile
-# 输出文件: Caddyfile
-cat Caddyfile   # 检查内容
-```
-
 ---
 
-## 四、构建 Caddy（带 alidns 插件）
+## 四、安装 Caddy
+
+**HTTP-01（官方 Caddy）：**
+
+```bash
+sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt-get update && sudo apt-get install -y caddy
+```
+
+**DNS-01（自定义构建，带 DNS 插件）：**
 
 ```bash
 # 安装 Go（如未安装）
@@ -139,8 +191,13 @@ sudo apt-get install -y golang
 # 安装 xcaddy
 go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
 
-# 构建带 alidns 插件的 Caddy
+# 构建带 DNS 插件的 Caddy（以阿里云为例）
 ~/go/bin/xcaddy build --with github.com/caddy-dns/alidns
+# 其他服务商:
+#   --with github.com/caddy-dns/cloudflare
+#   --with github.com/caddy-dns/dnspod
+#   --with github.com/caddy-dns/godaddy
+#   --with github.com/caddy-dns/namecheap
 
 # 安装到系统路径
 sudo mv caddy /usr/local/bin/
@@ -151,29 +208,36 @@ caddy version
 
 ## 五、准备凭据
 
-**模式 A（多客户端 OAuth）：** 密码已通过 `mma-mcp hash-password` 写入配置文件，
-环境变量文件只需要 DNS 相关凭据：
+环境变量文件包含 systemd 服务启动时读取的密钥。
+
+**使用 DNS-01 时**，需要填入 DNS 服务商的 API 凭据（以阿里云为例）：
 
 ```bash
 sudo tee /etc/mma-mcp.env > /dev/null << EOF
-ALIDNS_ACCESS_KEY_ID=<你的阿里云AccessKeyID>
-ALIDNS_ACCESS_KEY_SECRET=<你的阿里云AccessKeySecret>
+ALIDNS_ACCESS_KEY_ID=<你的AccessKeyID>
+ALIDNS_ACCESS_KEY_SECRET=<你的AccessKeySecret>
 EOF
 sudo chmod 600 /etc/mma-mcp.env
 ```
 
-**模式 B（静态单 token）：** 需要额外设置 auth token：
+其他服务商请填入对应的环境变量（见第三节的表格）。
+
+**使用 HTTP-01 时**，环境变量文件可以为空或仅包含认证凭据：
+
+```bash
+sudo touch /etc/mma-mcp.env
+sudo chmod 600 /etc/mma-mcp.env
+```
+
+**使用静态单 token 认证（模式 B）时**，还需要添加 auth token：
 
 ```bash
 MMA_MCP_AUTH_TOKEN=$(openssl rand -hex 32)
 echo "记住这个 token，Claude Web 配置时需要用:"
 echo "$MMA_MCP_AUTH_TOKEN"
 
-sudo tee /etc/mma-mcp.env > /dev/null << EOF
-MMA_MCP_AUTH_TOKEN=$MMA_MCP_AUTH_TOKEN
-ALIDNS_ACCESS_KEY_ID=<你的阿里云AccessKeyID>
-ALIDNS_ACCESS_KEY_SECRET=<你的阿里云AccessKeySecret>
-EOF
+# 追加到环境变量文件：
+echo "MMA_MCP_AUTH_TOKEN=$MMA_MCP_AUTH_TOKEN" | sudo tee -a /etc/mma-mcp.env > /dev/null
 sudo chmod 600 /etc/mma-mcp.env
 ```
 
