@@ -23,7 +23,8 @@ from mma_mcp.config import (
     AppConfig, SecurityConfig,
     load_config, generate_default_config,
 )
-from mma_mcp.kernel import KernelSession, find_kernel
+from mma_mcp.kernel import find_kernel
+from mma_mcp.pool import KernelPool
 from mma_mcp.security.registry import CapabilityRegistry
 from mma_mcp.stdio_transport import stdio_transport
 from mma_mcp.tools import RoleRuntime, ToolContext, register_tools, get_registered
@@ -36,7 +37,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 class App:
-    """Encapsulates server state: config, kernel, context, MCP server.
+    """Encapsulates server state: config, pool, context, MCP server.
 
     Using a class instead of module-level globals makes it easy to create
     isolated instances for testing or running multiple servers.
@@ -44,7 +45,7 @@ class App:
 
     def __init__(self, config: AppConfig | None = None) -> None:
         self.config = config or load_config()
-        self._kernel: KernelSession | None = None
+        self._pool: KernelPool | None = None
         self._ctx: ToolContext | None = None
         self._mcp: FastMCP | None = None
         self._init_lock = threading.Lock()
@@ -54,17 +55,20 @@ class App:
     # ------------------------------------------------------------------
 
     @property
-    def kernel(self) -> KernelSession:
-        if self._kernel is None:
+    def pool(self) -> KernelPool:
+        if self._pool is None:
             with self._init_lock:
-                if self._kernel is None:
+                if self._pool is None:
                     kernel_path = find_kernel(self.config.kernel.mathkernel or None)
-                    self._kernel = KernelSession(
-                        kernel=kernel_path,
-                        health_check_interval=self.config.kernel.health_check_interval,
-                        idle_timeout=self.config.kernel.idle_timeout,
+                    kc = self.config.kernel
+                    self._pool = KernelPool(
+                        kernel_path=kernel_path,
+                        pool_size=kc.pool_size,
+                        pool_min_idle=kc.pool_min_idle,
+                        max_requests_per_worker=kc.max_requests_per_worker,
+                        idle_timeout=kc.idle_timeout,
                     )
-        return self._kernel
+        return self._pool
 
     @property
     def ctx(self) -> ToolContext:
@@ -133,7 +137,7 @@ class App:
         return runtimes
 
     def _build_context(self) -> ToolContext:
-        """Build the ToolContext. Kernel is NOT started here — lazy start on first use."""
+        """Build the ToolContext. Workers are NOT started here — lazy start on first use."""
         registry = CapabilityRegistry()
         expr_filter = registry.build_filter(self.config.security)
         logger.info("Security filter ready (mode: %s)", self.config.security.mode)
@@ -145,7 +149,7 @@ class App:
 
         return ToolContext(
             config=self.config,
-            kernel=self.kernel,
+            pool=self.pool,
             expr_filter=expr_filter,
             role_runtimes=role_runtimes,
         )

@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from mma_mcp.config import AppConfig
-from mma_mcp.kernel import KernelSession
+from mma_mcp.pool import KernelPool
 from mma_mcp.security.filter import ExpressionFilter
 
 logger = logging.getLogger(__name__)
@@ -54,30 +54,22 @@ _active_filter: contextvars.ContextVar[ExpressionFilter | None] = contextvars.Co
 class ToolContext:
     """Runtime context available to all tools.
 
-    The kernel is started lazily on first access, so the MCP server can boot
-    and register tools without waiting for the Wolfram kernel.
+    Holds the kernel worker pool and security configuration.  Tools
+    acquire a worker from the pool for each evaluation — no shared
+    kernel state between calls.
     """
 
     def __init__(
         self,
         config: AppConfig,
-        kernel: KernelSession,
+        pool: KernelPool,
         expr_filter: ExpressionFilter,
         role_runtimes: dict[str, RoleRuntime] | None = None,
     ) -> None:
         self.config = config
-        self._kernel = kernel
+        self.pool = pool
         self.expr_filter = expr_filter
-        self._kernel_ready = False
         self.role_runtimes: dict[str, RoleRuntime] = role_runtimes or {}
-
-    @property
-    def kernel(self) -> KernelSession:
-        """Lazy kernel start: first tool call triggers kernel boot."""
-        if not self._kernel_ready:
-            self._kernel.start()  # no-op if already running
-            self._kernel_ready = True
-        return self._kernel
 
     def check(self, *expressions: str) -> None:
         """Run security check on one or more expression strings.
@@ -119,18 +111,6 @@ class ToolContext:
         if rt and rt.max_result_size > 0:
             return rt.max_result_size
         return self.config.kernel.max_result_size
-
-    @property
-    def session_context(self) -> str:
-        """Return the WL context name for the current client, or "" if no isolation."""
-        if not self.config.kernel.session_isolation:
-            return ""
-        from mma_mcp.auth import current_client
-        from mma_mcp.kernel import sanitize_context_name
-        client = current_client.get()
-        if not client.client_id:
-            return ""  # anonymous / stdio — no isolation
-        return sanitize_context_name(client.client_id)
 
     @property
     def default_format(self) -> str:

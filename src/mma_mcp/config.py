@@ -27,10 +27,12 @@ class KernelConfig:
     timeout: int = 30           # WL-side TimeConstrained timeout in seconds; 0 = no limit
     hard_timeout: int = 60      # Python-side hard timeout — force-restart kernel if stuck; 0 = no limit
     max_result_size: int = 65536  # max result string length (chars); 0 = no limit
-    session_isolation: bool = True  # isolate user variables via WL context namespacing
     default_format: str = "TeXForm"
-    health_check_interval: int = 60  # seconds between health pings; 0 = disabled
-    idle_timeout: int = 0            # reclaim kernel after N seconds idle; 0 = never
+    # Worker pool settings
+    pool_size: int = 0                  # max workers; 0 = min(cpu_count, 4)
+    pool_min_idle: int = 1              # pre-created workers (lazy-started)
+    max_requests_per_worker: int = 100  # restart worker after N evaluations (0 = never)
+    idle_timeout: int = 0               # reclaim excess idle workers after N seconds; 0 = never
 
 
 @dataclass
@@ -185,9 +187,10 @@ def _build_kernel_config(raw: dict[str, Any]) -> KernelConfig:
         timeout=sec.get("timeout", defaults.timeout),
         hard_timeout=sec.get("hard_timeout", defaults.hard_timeout),
         max_result_size=sec.get("max_result_size", defaults.max_result_size),
-        session_isolation=sec.get("session_isolation", defaults.session_isolation),
         default_format=sec.get("default_format", defaults.default_format),
-        health_check_interval=sec.get("health_check_interval", defaults.health_check_interval),
+        pool_size=sec.get("pool_size", defaults.pool_size),
+        pool_min_idle=sec.get("pool_min_idle", defaults.pool_min_idle),
+        max_requests_per_worker=sec.get("max_requests_per_worker", defaults.max_requests_per_worker),
         idle_timeout=sec.get("idle_timeout", defaults.idle_timeout),
     )
 
@@ -290,8 +293,12 @@ def _validate(config: AppConfig) -> None:
             f"kernel.default_format must be one of {sorted(valid_formats)}, "
             f"got {config.kernel.default_format!r}"
         )
-    if config.kernel.health_check_interval < 0:
-        errors.append(f"kernel.health_check_interval must be >= 0, got {config.kernel.health_check_interval}")
+    if config.kernel.pool_size < 0:
+        errors.append(f"kernel.pool_size must be >= 0, got {config.kernel.pool_size}")
+    if config.kernel.pool_min_idle < 0:
+        errors.append(f"kernel.pool_min_idle must be >= 0, got {config.kernel.pool_min_idle}")
+    if config.kernel.max_requests_per_worker < 0:
+        errors.append(f"kernel.max_requests_per_worker must be >= 0, got {config.kernel.max_requests_per_worker}")
     if config.kernel.idle_timeout < 0:
         errors.append(f"kernel.idle_timeout must be >= 0, got {config.kernel.idle_timeout}")
     if config.kernel.mathkernel and not Path(config.kernel.mathkernel).exists():
@@ -427,21 +434,25 @@ hard_timeout = 60
 # MCP responses. 0 = no limit.
 max_result_size = 65536
 
-# Session isolation: each authenticated AI client gets a separate WL context
-# namespace, so variables defined by one client are invisible to others.
-# Has no effect in single-client (stdio / no auth) mode.
-session_isolation = true
-
 # Default output format: TeXForm, OutputForm, InputForm, etc.
 default_format = "TeXForm"
 
-# Health check interval in seconds. A background thread pings the kernel
-# periodically; if it doesn't respond, the kernel is auto-restarted.
-# 0 = disabled.
-health_check_interval = 60
+# ── Worker Pool ──
+# Each tool call gets an exclusive kernel worker from the pool.
+# Workers are isolated at process level — no cross-client variable leakage.
 
-# Idle timeout in seconds. If no evaluation runs for this long, the kernel
-# is stopped to free resources. It restarts automatically on the next request.
+# Maximum number of concurrent kernel workers.
+# 0 = auto (min(cpu_count, 4)). Each idle kernel uses ~10-20 MB RSS.
+pool_size = 0
+
+# Minimum number of pre-created workers (lazy-started on first use).
+pool_min_idle = 1
+
+# Restart a worker after this many evaluations to prevent memory bloat.
+# 0 = never restart.
+max_requests_per_worker = 100
+
+# Reclaim excess idle workers (above pool_min_idle) after this many seconds.
 # 0 = never reclaim.
 idle_timeout = 0
 

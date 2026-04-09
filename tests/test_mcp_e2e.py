@@ -30,9 +30,8 @@ def app():
         tools=ToolsConfig(enabled=["evaluate", "evaluate_image"]),
     )
     a = App(config=config)
-    a.kernel.start()
     yield a
-    a.kernel.stop()
+    a.pool.stop()
 
 
 @pytest.fixture(scope="module")

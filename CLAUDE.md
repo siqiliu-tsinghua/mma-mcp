@@ -25,7 +25,8 @@ mma-mcp/
 │       ├── __init__.py
 │       ├── server.py              # App class + CLI entry point (argparse subcommands)
 │       ├── config.py              # TOML config loading, dataclasses, validation
-│       ├── kernel.py              # Wolfram kernel lifecycle, auto-restart, timeout
+│       ├── kernel.py              # KernelSession: single kernel lifecycle, auto-restart, timeout
+│       ├── pool.py               # KernelPool: worker pool for cross-client isolation
 │       ├── auth.py                # BearerAuthMiddleware, ClientIdentity contextvar
 │       ├── oauth.py               # Minimal OAuth 2.1 server (DCR + PKCE + AuthCode)
 │       ├── passwords.py           # scrypt hash/verify (stdlib only)
@@ -78,11 +79,11 @@ Layer 3: Expression filtering (security/)
 ### Key design decisions
 
 - **Pre-kernel filtering:** Expressions are filtered in Python (regex symbol extraction) before the kernel sees them. The kernel only receives policy-compliant code.
-- **Persistent kernel session:** Single long-lived `WolframLanguageSession` with auto-restart on crash. Lazy start on first tool call.
+- **Worker pool isolation:** Each tool call acquires an exclusive kernel worker from a pool (`KernelPool`). Workers are stateless — a temporary WL context is used per call and cleaned up on release. This provides process-level isolation between concurrent clients (no cross-client `Contexts[]`/`Names[]`/`UpValues` attacks). Pool supports lazy creation, idle reclaim, and periodic worker restart.
 - **Two-layer timeout:** WL-side `TimeConstrained` (cooperative) + Python-side `ThreadPoolExecutor` hard timeout (force-restart on stuck kernel).
 - **Config-driven:** All behavior controlled via `mma_mcp.toml`. Tools, security policy, auth, resource limits — all configurable without code changes.
 - **Contextvar-based RBAC:** `current_client` and `_active_filter` contextvars propagate per-request identity and security policy, concurrent-safe.
-- **Session isolation:** Each authenticated client gets an isolated WL context namespace (`MCP$clientid\``), so variables are invisible across clients.
+- **Stateless evaluation:** Each tool call uses a temporary WL context (`Pool$<random>\``) that is cleaned up after execution. AI clients generate self-contained expressions (using `Module`/`With`/`Block` for local state).
 
 ## Security Architecture
 

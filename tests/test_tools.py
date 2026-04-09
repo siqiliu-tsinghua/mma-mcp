@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextvars
+from contextlib import contextmanager
 from dataclasses import dataclass
 from unittest.mock import MagicMock
 
@@ -26,13 +27,18 @@ from mma_mcp.tools import (
 # Helpers
 # ===================================================================
 
-def _make_kernel_mock() -> MagicMock:
-    """Create a mock KernelSession."""
-    kernel = MagicMock()
-    kernel.evaluate_to_string.return_value = "42"
-    kernel.evaluate_to_image.return_value = b"\x89PNG"
-    kernel.start.return_value = None
-    return kernel
+class _MockPool:
+    """Minimal mock of KernelPool for unit tests."""
+
+    def __init__(self):
+        self.kernel = MagicMock()
+        self.kernel.evaluate_to_string.return_value = "42"
+        self.kernel.evaluate_to_image.return_value = b"\x89PNG"
+        self.kernel.start.return_value = None
+
+    @contextmanager
+    def worker(self):
+        yield self.kernel, "Test$ctx`"
 
 
 def _make_ctx(
@@ -40,24 +46,21 @@ def _make_ctx(
     mode: str = "blacklist",
     role_runtimes: dict[str, RoleRuntime] | None = None,
 ) -> ToolContext:
-    """Build a ToolContext with a mock kernel and a given security mode."""
+    """Build a ToolContext with a mock pool and a given security mode."""
     config = AppConfig()
-    kernel = _make_kernel_mock()
+    pool = _MockPool()
     blocked = frozenset({"Run", "RunProcess", "DeleteFile"})
     if mode == "blacklist":
         expr_filter = ExpressionFilter("blacklist", blocked)
     else:
         expr_filter = ExpressionFilter("whitelist", frozenset({"Sin", "Cos", "Plus", "x"}))
 
-    ctx = ToolContext(
+    return ToolContext(
         config=config,
-        kernel=kernel,
+        pool=pool,
         expr_filter=expr_filter,
         role_runtimes=role_runtimes or {},
     )
-    # Mark kernel as ready so lazy start doesn't trigger
-    ctx._kernel_ready = True
-    return ctx
 
 
 # ===================================================================
@@ -300,56 +303,24 @@ class TestRegisterTools:
 
 
 # ===================================================================
-# Session isolation
+# Pool worker context manager (via ToolContext.pool)
 # ===================================================================
 
-class TestSessionIsolation:
+class TestPoolWorkerFromContext:
 
-    def test_session_context_with_user(self):
-        """Authenticated user gets a WL context string."""
+    def test_worker_yields_kernel_and_context(self):
         ctx = _make_ctx()
-        from mma_mcp.auth import ClientIdentity, current_client
-        tok = current_client.set(ClientIdentity(client_id="alice", role="admin"))
-        try:
-            sc = ctx.session_context
-            assert sc == "MCP$alice`"
-        finally:
-            current_client.reset(tok)
+        with ctx.pool.worker() as (kernel, wl_context):
+            assert kernel is not None
+            assert isinstance(wl_context, str)
+            assert wl_context.endswith("`")
 
-    def test_session_context_anonymous(self):
-        """Anonymous user gets empty string (no isolation)."""
-        ctx = _make_ctx()
-        assert ctx.session_context == ""
-
-    def test_session_context_disabled(self):
-        """When session_isolation=False, always returns empty."""
-        from mma_mcp.config import KernelConfig
-        config = AppConfig(kernel=KernelConfig(session_isolation=False))
-        kernel = _make_kernel_mock()
-        expr_filter = ExpressionFilter("blacklist", frozenset())
-        ctx = ToolContext(config=config, kernel=kernel, expr_filter=expr_filter)
-        ctx._kernel_ready = True
-
-        from mma_mcp.auth import ClientIdentity, current_client
-        tok = current_client.set(ClientIdentity(client_id="alice", role="admin"))
-        try:
-            assert ctx.session_context == ""
-        finally:
-            current_client.reset(tok)
-
-    def test_sanitize_context_name(self):
-        from mma_mcp.kernel import sanitize_context_name
-        assert sanitize_context_name("alice") == "MCP$alice`"
-        assert sanitize_context_name("Bob123") == "MCP$Bob123`"
-        assert sanitize_context_name("a@b.c") == "MCP$abc`"
-        assert sanitize_context_name("") == "MCP$anonymous`"
-        assert sanitize_context_name("$admin") == "MCP$$admin`"
-
-    def test_wrap_context(self):
+    def test_wrap_context_still_works(self):
+        """_wrap_context is still used internally by KernelSession for temp contexts."""
         from mma_mcp.kernel import _wrap_context
         assert _wrap_context("1+1", "") == "1+1"
-        wrapped = _wrap_context("x = 5", "MCP$alice`")
-        assert '$Context = "MCP$alice`"' in wrapped
+        wrapped = _wrap_context("x = 5", "Pool$abc1`")
+        assert '$Context = "Pool$abc1`"' in wrapped
         assert '$ContextPath' in wrapped
         assert "x = 5" in wrapped
 

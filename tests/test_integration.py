@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from mma_mcp.config import AppConfig, KernelConfig, SecurityConfig
-from mma_mcp.kernel import KernelSession, _wrap_context, sanitize_context_name
+from mma_mcp.kernel import KernelSession, _wrap_context
 from mma_mcp.security.filter import ExpressionFilter, SecurityError
 from mma_mcp.security.registry import CapabilityRegistry
 
@@ -128,47 +128,54 @@ class TestSecurityPipeline:
 
 
 # ===================================================================
-# 3. Session isolation
+# 3. Worker pool context isolation
 # ===================================================================
 
-class TestSessionIsolation:
+class TestPoolContextIsolation:
 
-    def test_different_contexts_are_isolated(self, kernel):
-        """Variables set in one context should not be visible in another."""
-        ctx_a = sanitize_context_name("alice")
-        ctx_b = sanitize_context_name("bob")
+    def test_temp_context_isolates_variables(self, kernel):
+        """Variables set in a temp context should not leak to another."""
+        ctx_a = "Pool$aaa`"
+        ctx_b = "Pool$bbb`"
 
-        # Use unique variable names to avoid cross-test pollution
-        # Alice sets myVar = 42
+        # Set variable in context A
         kernel.evaluate_to_string("myVar = 42", "OutputForm", context=ctx_a)
 
-        # Bob reads myVar — should NOT see 42
+        # Context B should NOT see it
         result_bob = kernel.evaluate_to_string("myVar", "OutputForm", context=ctx_b)
-        assert "42" not in result_bob, f"Bob should not see Alice's myVar, got: {result_bob}"
+        assert "42" not in result_bob
 
-        # Alice reads myVar — should get 42
+        # Context A should still see it
         result_alice = kernel.evaluate_to_string("myVar", "OutputForm", context=ctx_a)
         assert result_alice.strip() == "42"
 
-        # Global should also be clean
-        result_global = kernel.evaluate_to_string("myVar", "OutputForm")
-        assert "42" not in result_global
+        # Cleanup (simulates pool release)
+        from wolframclient.language import wlexpr
+        kernel.evaluate(wlexpr(f'Remove["{ctx_a}*"]'))
+        kernel.evaluate(wlexpr(f'Remove["{ctx_b}*"]'))
 
-    def test_system_symbols_accessible_in_context(self, kernel):
-        """System` functions should work normally inside a user context."""
-        ctx = sanitize_context_name("testuser")
+    def test_system_symbols_accessible_in_temp_context(self, kernel):
+        """System` functions should work inside a pool temp context."""
         result = kernel.evaluate_to_string(
-            "Sin[Pi/2]", "OutputForm", context=ctx,
+            "Sin[Pi/2]", "OutputForm", context="Pool$test`",
         )
         assert result.strip() == "1"
 
-    def test_no_context_shares_global(self, kernel):
-        """Without context, variables are in Global` (shared)."""
-        kernel.evaluate_to_string("testGlobalVar = 99", "OutputForm")
-        result = kernel.evaluate_to_string("testGlobalVar", "OutputForm")
-        assert result.strip() == "99"
-        # Cleanup
-        kernel.evaluate_to_string("Remove[testGlobalVar]", "OutputForm")
+    def test_cleanup_removes_temp_symbols(self, kernel):
+        """Remove[ctx*] should clean up all symbols from the temp context."""
+        ctx = "Pool$cleanup`"
+        from wolframclient.language import wlexpr
+
+        kernel.evaluate_to_string("testCleanupVar = 123", "OutputForm", context=ctx)
+        result = kernel.evaluate_to_string("testCleanupVar", "OutputForm", context=ctx)
+        assert result.strip() == "123"
+
+        # Simulate pool cleanup
+        kernel.evaluate(wlexpr(f'Remove["{ctx}*"]'))
+
+        # Variable should be gone
+        result2 = kernel.evaluate_to_string("testCleanupVar", "OutputForm", context=ctx)
+        assert "123" not in result2
 
 
 # ===================================================================
