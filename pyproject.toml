@@ -6,6 +6,7 @@ build-backend = "hatchling.build"
 name = "mma-mcp"
 version = "0.1.0"
 description = "Wolfram Engine MCP Server"
+license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
     "mcp[cli]>=1.0",

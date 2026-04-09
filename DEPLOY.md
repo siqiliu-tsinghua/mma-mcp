@@ -1,71 +1,71 @@
-# mma-mcp VPS 部署指南
+# mma-mcp VPS Deployment Guide
 
-> **使用场景：** 本指南面向已持有 Wolfram Engine / Mathematica 许可证的个人用户，帮助你将本地 Wolfram 内核通过 HTTPS 挂载到自己的网页版和移动版 AI 客户端（如 Claude.ai、ChatGPT），以便在任何设备上使用 Wolfram 计算能力。部署后的服务仅供许可证持有者本人使用。是否可用于其他场景，请自行根据你的 Wolfram 许可证条款确认。
+> **Use case:** This guide is for individual users who hold a Wolfram Engine / Mathematica license and want to expose their local Wolfram kernel over HTTPS to their own web/mobile AI clients (Claude.ai, ChatGPT, etc.), so they can use Wolfram computation from any device. The deployed service is for the license holder's personal use only. Whether other use cases are permitted depends on your Wolfram license terms.
 
-> **适用平台：** 本指南针对 **Debian / Ubuntu** 系 Linux。其他发行版的包名和 systemd 细节可能不同，欢迎贡献适配文档（见 [CONTRIBUTING.md](CONTRIBUTING.md)）。
+> **Target platform:** This guide targets **Debian / Ubuntu** Linux. Package names and systemd details may differ on other distributions. Contributions for other platforms are welcome (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 
-## 前置条件
+## Prerequisites
 
-- Debian / Ubuntu VPS，已持有并安装 Wolfram Engine / Mathematica 14.3
-- 阿里云域名 + RAM 子账号（AliyunDNSFullAccess 权限）
-- 80/443 端口可用
+- Debian / Ubuntu VPS with Wolfram Engine / Mathematica 14.3 installed and licensed
+- A domain name with DNS API access (e.g., Alibaba Cloud DNS with RAM sub-account and AliyunDNSFullAccess permission)
+- Ports 80/443 available
 
 ---
 
-## 一、VPS 环境准备
+## 1. VPS Environment Setup
 
 ```bash
-# 1. 从 bundle 克隆项目
-git clone /tmp/mma-mcp.bundle /opt/mma-mcp
+# 1. Clone the project
+git clone https://github.com/liusq7/mma-mcp.git /opt/mma-mcp
 cd /opt/mma-mcp
 
-# 2. 安装 uv（如未安装）
+# 2. Install uv (if not already installed)
 curl -LsSf https://astral.sh/uv/install.sh | sh
-source ~/.bashrc   # 或重新登录
+source ~/.bashrc
 
-# 3. 安装依赖
+# 3. Install dependencies
 uv sync
 
-# 4. 确认内核路径
+# 4. Verify kernel path
 which WolframKernel
-# 或者 ls /usr/local/Wolfram/Mathematica/14.3/Executables/WolframKernel
+# or: ls /usr/local/Wolfram/Mathematica/14.3/Executables/WolframKernel
 
-# 5. 生成安全分组（约 1 分钟，首次运行需要启动内核查询符号分类）
+# 5. Generate security groups (~1 min, queries local kernel for symbol classification)
 uv run mma-mcp setup
 ```
 
 ---
 
-## 二、域名 DNS
+## 2. DNS Configuration
 
 ```bash
-# 在阿里云 DNS 控制台添加 A 记录：
-#   主机记录: mma（或你喜欢的子域名）
-#   记录值:   <VPS 公网 IP>
-#   TTL:      600
+# Add an A record in your DNS provider's console:
+#   Host: mma (or your preferred subdomain)
+#   Value: <VPS public IP>
+#   TTL: 600
 
-# 验证 DNS 生效
+# Verify DNS propagation
 dig mma.yourdomain.com +short
-# 应返回 VPS 公网 IP
+# Should return your VPS public IP
 ```
 
 ---
 
-## 三、配置 mma-mcp
+## 3. Configure mma-mcp
 
 ```bash
 cd /opt/mma-mcp
 
-# 生成默认配置
+# Generate default config
 uv run mma-mcp init
 ```
 
-编辑 `mma_mcp.toml`，修改以下关键项：
+Edit `mma_mcp.toml` with the following key settings:
 
 ```toml
 [kernel]
-# 如果 which WolframKernel 能找到，留空即可
-# 否则填写完整路径：
+# Leave empty if `which WolframKernel` works
+# Otherwise specify the full path:
 # mathkernel = "/usr/local/Wolfram/Mathematica/14.3/Executables/WolframKernel"
 
 [server]
@@ -79,13 +79,13 @@ domain = "mma.yourdomain.com"
 dns_provider = "alidns"
 ```
 
-### 认证模式选择
+### Authentication Mode
 
-mma-mcp 支持两种 HTTP 认证模式，按需选择：
+mma-mcp supports two HTTP authentication modes:
 
-**模式 A：多客户端 OAuth（推荐）**
+**Mode A: Multi-client OAuth (recommended)**
 
-适用于同时从多个 AI 客户端（如 Claude.ai 和 ChatGPT）访问同一台机器上的 Wolfram 内核。每个客户端有独立的凭据和可选的权限策略。
+For accessing the same Wolfram kernel from multiple AI clients (e.g., Claude.ai and ChatGPT simultaneously). Each client gets independent credentials and optional permission policies.
 
 ```toml
 [auth]
@@ -93,115 +93,109 @@ enabled = true
 
 [auth.clients.claude]
 role = "default"
-password_hash = "scrypt:..."   # 用 mma-mcp hash-password 生成
+password_hash = "scrypt:..."   # Generate with: mma-mcp hash-password
 
 [auth.roles.default]
 tools = "*"
-security = ""  # 空字符串 = 继承全局安全策略
+security = ""  # Empty string = inherit global security policy
 ```
 
-生成客户端配置片段：
+Generate a client config snippet:
 ```bash
 uv run mma-mcp add-client claude --role default
-# 按提示输入密码，将输出的 TOML 片段粘贴到 mma_mcp.toml
+# Enter password at prompt, paste the output TOML into mma_mcp.toml
 ```
 
-Web 客户端（Claude.ai 等）连接时会走 OAuth 2.1 流程（DCR + PKCE + 授权码），
-在登录页面输入 client ID 和密码。
+Web clients (Claude.ai, etc.) will go through the OAuth 2.1 flow (DCR + PKCE + authorization code). Users enter client ID and password on the login page.
 
-**模式 B：静态单 token（简单场景）**
+**Mode B: Static single token (simple setup)**
 
-适用于只有单个客户端、不需要角色区分的场景。不要同时启用 `[auth]`。
+For single-client scenarios without role differentiation. Do not enable `[auth]` at the same time.
 
 ```toml
 [server]
-auth_token_env = "MMA_MCP_AUTH_TOKEN"   # 从环境变量读取 token
+auth_token_env = "MMA_MCP_AUTH_TOKEN"   # Read token from environment variable
 ```
 
-Web 客户端连接时同样会走 OAuth 流程，但登录页面只显示密码字段（token 即密码）。
+Web clients will still go through the OAuth flow, but the login page shows only a password field (the token is the password).
 
-生成 Caddyfile：
+### Generate Caddyfile
 
 ```bash
 uv run mma-mcp caddyfile
-# 输出文件: Caddyfile
-cat Caddyfile   # 检查内容
+cat Caddyfile   # Review the output
 ```
 
 ---
 
-## 四、构建 Caddy（带 alidns 插件）
+## 4. Build Caddy (with DNS plugin)
 
 ```bash
-# 安装 Go（如未安装）
+# Install Go (if not already installed)
 sudo apt-get install -y golang
 
-# 安装 xcaddy
+# Install xcaddy
 go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
 
-# 构建带 alidns 插件的 Caddy
+# Build Caddy with your DNS provider plugin
 ~/go/bin/xcaddy build --with github.com/caddy-dns/alidns
 
-# 安装到系统路径
+# Install to system path
 sudo mv caddy /usr/local/bin/
 caddy version
 ```
 
 ---
 
-## 五、准备凭据
+## 5. Prepare Credentials
 
-**模式 A（多客户端 OAuth）：** 密码已通过 `mma-mcp hash-password` 写入配置文件，
-环境变量文件只需要 DNS 相关凭据：
+**Mode A (multi-client OAuth):** Passwords are already hashed in the config file. The environment file only needs DNS credentials:
 
 ```bash
 sudo tee /etc/mma-mcp.env > /dev/null << EOF
-ALIDNS_ACCESS_KEY_ID=<你的阿里云AccessKeyID>
-ALIDNS_ACCESS_KEY_SECRET=<你的阿里云AccessKeySecret>
+ALIDNS_ACCESS_KEY_ID=<your-access-key-id>
+ALIDNS_ACCESS_KEY_SECRET=<your-access-key-secret>
 EOF
 sudo chmod 600 /etc/mma-mcp.env
 ```
 
-**模式 B（静态单 token）：** 需要额外设置 auth token：
+**Mode B (static single token):** Also set the auth token:
 
 ```bash
 MMA_MCP_AUTH_TOKEN=$(openssl rand -hex 32)
-echo "记住这个 token，Claude Web 配置时需要用:"
+echo "Save this token for Claude Web configuration:"
 echo "$MMA_MCP_AUTH_TOKEN"
 
 sudo tee /etc/mma-mcp.env > /dev/null << EOF
 MMA_MCP_AUTH_TOKEN=$MMA_MCP_AUTH_TOKEN
-ALIDNS_ACCESS_KEY_ID=<你的阿里云AccessKeyID>
-ALIDNS_ACCESS_KEY_SECRET=<你的阿里云AccessKeySecret>
+ALIDNS_ACCESS_KEY_ID=<your-access-key-id>
+ALIDNS_ACCESS_KEY_SECRET=<your-access-key-secret>
 EOF
 sudo chmod 600 /etc/mma-mcp.env
 ```
 
 ---
 
-## 六、创建专用服务用户
+## 6. Create a Dedicated Service User
 
 ```bash
-# 创建无登录 shell 的系统用户
+# Create a system user with no login shell
 sudo useradd -r -s /usr/sbin/nologin -m -d /opt/mma-mcp mma
 
-# 将项目目录所有权交给该用户
+# Transfer project directory ownership
 sudo chown -R mma:mma /opt/mma-mcp
 
-# 让 mma 用户可以读取 Mathematica license
-# （根据实际安装路径调整，通常 /usr/local/Wolfram 已经是 world-readable）
+# Ensure the mma user can read the Mathematica license
 ls -la /usr/local/Wolfram/Mathematica/14.3/Configuration/Licensing/
 ```
 
-> **说明：** 绑定低端口（<1024，如 443）是 Linux capability（`CAP_NET_BIND_SERVICE`），
-> 不是传统的组权限，无法通过加组解决。下面在 Caddy 的 systemd 服务中通过
-> `AmbientCapabilities` 授予，仅对该服务进程生效，不影响全局。
+> **Note:** Binding to low ports (<1024, e.g., 443) requires the Linux `CAP_NET_BIND_SERVICE` capability, not traditional group permissions. This is granted via `AmbientCapabilities` in the Caddy systemd service below.
 
 ---
 
-## 七、systemd 服务
+## 7. systemd Services
 
-### mma-mcp 服务
+### mma-mcp Service
 
 ```bash
 sudo tee /etc/systemd/system/mma-mcp.service > /dev/null << 'EOF'
@@ -223,7 +217,7 @@ WantedBy=multi-user.target
 EOF
 ```
 
-### Caddy 服务
+### Caddy Service
 
 ```bash
 sudo tee /etc/systemd/system/caddy-mma.service > /dev/null << 'EOF'
@@ -240,7 +234,7 @@ ExecStart=/usr/local/bin/caddy run --config /opt/mma-mcp/Caddyfile
 Restart=on-failure
 RestartSec=5
 
-# 允许绑定 443 端口（无需 root）
+# Allow binding to port 443 without root
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 
@@ -249,90 +243,90 @@ WantedBy=multi-user.target
 EOF
 ```
 
-### 启动服务
+### Start Services
 
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now mma-mcp caddy-mma
 
-# 检查状态
+# Check status
 sudo systemctl status mma-mcp
 sudo systemctl status caddy-mma
 
-# 查看日志
+# View logs
 sudo journalctl -u mma-mcp -f
 sudo journalctl -u caddy-mma -f
 ```
 
 ---
 
-## 八、验证部署
+## 8. Verify Deployment
 
 ```bash
-# 检查 OAuth 元数据端点（不需要认证）
+# Check OAuth metadata endpoint (no auth required)
 curl -s https://mma.yourdomain.com/.well-known/oauth-authorization-server | python3 -m json.tool
-# 应返回包含 authorization_endpoint、token_endpoint 等字段的 JSON
+# Should return JSON with authorization_endpoint, token_endpoint, etc.
 
-# 检查 MCP 端点（需要认证，预期返回 401）
+# Check MCP endpoint (auth required, expect 401)
 curl -v https://mma.yourdomain.com/mcp
-# 应返回 401 Unauthorized，说明认证中间件正常工作
+# Should return 401 Unauthorized
 
-# 模式 B 用户可直接带 token 测试：
+# Mode B users can test directly with token:
 # source /etc/mma-mcp.env
 # curl -v -H "Authorization: Bearer $MMA_MCP_AUTH_TOKEN" https://mma.yourdomain.com/mcp
-# 应返回 405 Method Not Allowed（MCP 端点不接受 GET，说明服务正常）
+# Should return 405 Method Not Allowed (MCP doesn't accept GET — service is working)
 
-# 如果证书未签发，检查 Caddy 日志：
+# If certificate isn't issued, check Caddy logs:
 sudo journalctl -u caddy-mma --no-pager | tail -30
 ```
 
 ---
 
-## 九、Claude Web 连通测试
+## 9. Connect from Claude Web
 
-1. 打开 https://claude.ai
+1. Go to https://claude.ai
 2. Settings -> MCP Servers -> Add Server
 3. URL: `https://mma.yourdomain.com/mcp`
-4. 会走 OAuth 2.1 认证流程：
-   - 模式 A：输入 client ID（如 `claude`）和密码
-   - 模式 B：仅输入密码（即 auth token）
-5. 测试对话：
-   - "计算 1+1"
-   - "画出 Sin[x] 在 0 到 2π 的图像"
-   - "求解 x^2 - 5x + 6 = 0"
+4. Complete the OAuth 2.1 authentication flow:
+   - Mode A: enter client ID (e.g., `claude`) and password
+   - Mode B: enter password only (the auth token)
+5. Test with a conversation:
+   - "Compute 1+1"
+   - "Plot Sin[x] from 0 to 2 Pi"
+   - "Solve x^2 - 5x + 6 = 0"
 
 ---
 
-## 十、fail2ban 防护（可选）
+## 10. fail2ban Protection (optional)
 
-用 fail2ban 在 IP 层封禁路径扫描器和登录暴力破解。需要两个 filter：
+Use fail2ban to block path scanners and login brute-force attempts at the IP level. Two filters are needed:
 
-### 安装
+### Install
 
 ```bash
 sudo apt-get install -y fail2ban
 ```
 
-### Filter 1：路径扫描检测
+### Filter 1: Path Scan Detection
 
-检测对无效路径的探测（`/admin`、`/.env`、`/wp-login.php` 等），排除所有合法端点。
+Detects probes to invalid paths (`/admin`, `/.env`, `/wp-login.php`, etc.), excluding all legitimate endpoints.
 
 ```bash
 sudo tee /etc/fail2ban/filter.d/mma-mcp-probe.conf > /dev/null << 'EOF'
 [Definition]
 datepattern = {NONE}
 
-# 匹配 uvicorn access log 中非合法路径的 401/403/404 响应
-# 排除: /, /mcp, /oauth/*, /.well-known/*, /favicon.ico
+# Match uvicorn access log entries for non-legitimate paths returning 401/403/404
+# Excludes: /, /mcp, /oauth/*, /.well-known/*, /favicon.ico
 failregex = ^.*\b<HOST>(?::\d+)?\s+-\s+"[A-Z]+\s+/(?!(?:$|mcp(?:[/? ]|$)|oauth[/? ]|\.well-known[/? ]|favicon\.ico(?:[? ]|$)))\S+\s+HTTP/\d(?:\.\d+)?"\s+(?:401|403|404)\b
 
 ignoreregex =
 EOF
 ```
 
-### Filter 2：登录暴力破解检测
+### Filter 2: Login Brute-Force Detection
 
-匹配应用层输出的 `AUTH_FAIL` 日志（包含客户端 IP）。
+Matches application-level `AUTH_FAIL` log entries containing the client IP.
 
 ```bash
 sudo tee /etc/fail2ban/filter.d/mma-mcp-auth.conf > /dev/null << 'EOF'
@@ -345,11 +339,11 @@ ignoreregex =
 EOF
 ```
 
-### Jail 配置
+### Jail Configuration
 
 ```bash
 sudo tee /etc/fail2ban/jail.d/mma-mcp.local > /dev/null << 'EOF'
-# 路径扫描：5 次 404 → ban 12 小时
+# Path scanning: 5 hits -> ban 12 hours
 [mma-mcp-probe]
 enabled   = true
 backend   = systemd
@@ -361,7 +355,7 @@ findtime  = 10m
 maxretry  = 5
 bantime   = 12h
 
-# 登录暴力破解：5 次失败 → ban 1 小时
+# Login brute-force: 5 failures -> ban 1 hour
 [mma-mcp-auth]
 enabled   = true
 backend   = systemd
@@ -375,43 +369,40 @@ bantime   = 1h
 EOF
 ```
 
-### 启用
+### Enable
 
 ```bash
 sudo systemctl enable --now fail2ban
 sudo fail2ban-client reload
 
-# 检查 jail 状态
+# Check jail status
 sudo fail2ban-client status mma-mcp-probe
 sudo fail2ban-client status mma-mcp-auth
 
-# 手动解封 IP（如有误封）
+# Manually unban an IP (if needed)
 sudo fail2ban-client set mma-mcp-probe unbanip <IP>
 ```
 
-> **说明：** 应用层已有指数退避防护（5 次失败后逐步加锁到最长 15 分钟），
-> fail2ban 是第二层防线，直接在网络层丢弃恶意 IP 的所有流量。
-> 登录 jail 的 `bantime` 设为 1 小时（比扫描的 12 小时短），
-> 因为合法用户输错密码的概率更高。
+> **Note:** The application layer already has exponential backoff protection (locking up to 15 minutes after 5 failures). fail2ban is a second layer of defense, dropping all traffic from malicious IPs at the network level. The login jail `bantime` is set to 1 hour (shorter than the 12-hour scanning ban) because legitimate users are more likely to mistype a password.
 
 ---
 
-## 排障
+## Troubleshooting
 
 ```bash
-# mma-mcp 启动失败
+# mma-mcp fails to start
 sudo journalctl -u mma-mcp -e
 
-# Caddy 证书签发失败
-# - 检查 DNS API 凭据是否正确
-# - 检查 A 记录是否已生效: dig mma.yourdomain.com
-# - 检查环境变量: sudo cat /etc/mma-mcp.env
+# Caddy certificate issuance fails
+# - Check DNS API credentials
+# - Verify A record: dig mma.yourdomain.com
+# - Check environment variables: sudo cat /etc/mma-mcp.env
 
-# 内核找不到
+# Kernel not found
 uv run python -c "from mma_mcp.kernel import find_kernel; print(find_kernel())"
 
-# 手动测试 HTTP 端
+# Manual HTTP test
 uv run mma-mcp serve --transport http --host 127.0.0.1 --port 8000
-# 另一个终端:
+# In another terminal:
 curl http://127.0.0.1:8000/mcp
 ```

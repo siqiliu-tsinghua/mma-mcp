@@ -57,9 +57,17 @@ mma-mcp/
 │   └── generate_groups.wl         # Pure WL alternative for group generation
 ├── pyproject.toml
 ├── CLAUDE.md
-├── ARCHITECTURE.md                # Detailed architecture documentation (Chinese)
-├── DEPLOY.md                      # VPS deployment guide
-└── README.md
+├── LICENSE                        # MIT License
+├── README.md                      # English README
+├── README-cn.md                   # Chinese README
+├── ARCHITECTURE.md                # Architecture documentation (English)
+├── ARCHITECTURE-cn.md             # Architecture documentation (Chinese)
+├── DEPLOY.md                      # VPS deployment guide (English)
+├── DEPLOY-cn.md                   # VPS deployment guide (Chinese)
+├── CONTRIBUTING.md                # Contributing guide (English)
+├── CONTRIBUTING-cn.md             # Contributing guide (Chinese)
+├── SECURITY.md                    # Security policy (English)
+└── SECURITY-cn.md                 # Security policy (Chinese)
 ```
 
 ## Architecture Overview

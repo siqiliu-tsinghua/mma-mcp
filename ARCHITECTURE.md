@@ -1,303 +1,303 @@
-# mma-mcp 架构文档
+# mma-mcp Architecture
 
-## 项目定位
+## Project Purpose
 
-mma-mcp 是一个 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 服务器，使持有 Wolfram Engine / Mathematica 许可证的个人能够通过 AI 助手（Claude、ChatGPT 等）调用自己本地安装的 Wolfram 内核进行符号计算、数值分析和数据可视化。
+mma-mcp is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that enables individual Wolfram Engine / Mathematica license holders to invoke their locally-installed Wolfram kernel through AI assistants (Claude, ChatGPT, etc.) for symbolic computation, numerical analysis, and data visualization.
 
-> **合规声明**：本项目是非官方的个人作品，与 Wolfram Research 无任何隶属、赞助或认证关系。用户须自行合法获取 Wolfram Engine / Mathematica 许可证，并在许可范围内使用。本项目不包含任何 Wolfram 二进制文件、激活密钥或授权文件。
+> **Disclaimer:** This is an unofficial, independent project with no affiliation to Wolfram Research. Users must independently obtain and license their own Wolfram Engine / Mathematica. This project contains no Wolfram binaries, activation keys, or license files.
 
-### 设计目标
+### Design Goals
 
-1. **开箱即用**：单份 TOML 配置文件控制所有行为，`mma-mcp init` 一键生成默认配置。
-2. **安全第一**：表达式在到达内核前经过符号级安全过滤，防止通过 MCP 执行系统命令或文件操作。
-3. **AI 客户端隔离**：内置 OAuth 2.1 + 角色系统，支持不同 AI 客户端（如 Claude 和 ChatGPT）使用不同策略、互不干扰。
-4. **可配置而非可编程**：新增/禁用工具、调整安全策略、管理客户端权限均通过配置完成，不改代码。
-5. **依赖精简**：核心运行时仅依赖 `mcp[cli]` + `wolframclient`，密码哈希使用 stdlib。
+1. **Works out of the box**: A single TOML config file controls all behavior; `mma-mcp init` generates defaults.
+2. **Security first**: Expressions are filtered at the symbol level before reaching the kernel, preventing system command execution or file operations through MCP.
+3. **AI client isolation**: Built-in OAuth 2.1 + role system allows different AI clients (e.g., Claude and ChatGPT) to use different policies without interference.
+4. **Configurable, not programmable**: Adding/disabling tools, adjusting security policies, and managing client permissions are all done through configuration, not code changes.
+5. **Minimal dependencies**: Core runtime depends only on `mcp[cli]` + `wolframclient`; password hashing uses stdlib.
 
-### 典型应用场景
+### Typical Use Cases
 
-- **个人研究**：本机 stdio 连接，Claude Desktop / Claude Code 直接调用 Wolfram 求解方程、绘图、符号推导。
-- **多客户端隔离**：同一台机器上为不同 AI 客户端配置不同角色，限制各自可用的 Wolfram 功能子集和资源上限。
+- **Personal research**: Local stdio connection, Claude Desktop / Claude Code directly invoking Wolfram to solve equations, plot, and perform symbolic derivation.
+- **Multi-client isolation**: Different AI clients on the same machine configured with different roles, restricting each client's available Wolfram function subset and resource limits.
 
-### 明确不做的事
+### Explicit Non-Goals
 
-- **不是 Wolfram Cloud 客户端**——仅使用本地 Wolfram Engine，不联网调用 Wolfram 服务。
-- **不是通用代码执行平台**——只执行 Wolfram Language，且受安全策略约束。
-- **不做多用户服务**——设计为单一许可证持有者的个人工具，不面向团队或组织共享内核。
-
----
-
-## 技术栈
-
-| 层 | 技术 | 说明 |
-|----|------|------|
-| 语言 | Python 3.11+ | stdlib `tomllib`、`hashlib.scrypt`、`contextvars` |
-| MCP 协议 | `mcp[cli]` (FastMCP) | 官方 Python SDK，提供 tool/resource/prompt 抽象 |
-| Wolfram 桥接 | `wolframclient` | `WolframLanguageSession` 持久连接本地内核 |
-| HTTP 服务 | Starlette + uvicorn | FastMCP 的 Streamable HTTP 底层，OAuth 路由直接挂载 |
-| 包管理 | uv | 开发和运行均通过 `uv run` |
-| TLS 终结 | Caddy（可选） | 自动 HTTPS + DNS-01 证书申请，项目可生成 Caddyfile |
+- **Not a Wolfram Cloud client** — uses only the local Wolfram Engine, no network calls to Wolfram services.
+- **Not a general-purpose code execution platform** — only executes Wolfram Language, subject to security policy constraints.
+- **Not a multi-user service** — designed as a personal tool for a single license holder, not for team or organizational kernel sharing.
 
 ---
 
-## 整体架构
+## Tech Stack
+
+| Layer | Technology | Notes |
+|-------|------------|-------|
+| Language | Python 3.11+ | stdlib `tomllib`, `hashlib.scrypt`, `contextvars` |
+| MCP Protocol | `mcp[cli]` (FastMCP) | Official Python SDK, provides tool/resource/prompt abstractions |
+| Wolfram Bridge | `wolframclient` | `WolframLanguageSession` persistent connection to local kernel |
+| HTTP Server | Starlette + uvicorn | FastMCP's Streamable HTTP backend, OAuth routes mounted directly |
+| Package Manager | uv | Development and runtime both via `uv run` |
+| TLS Termination | Caddy (optional) | Auto HTTPS + DNS-01 certificate acquisition; project can generate Caddyfile |
+
+---
+
+## Overall Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                     MCP 客户端                           │
-│  Claude Desktop / Claude Code / Claude.ai / ChatGPT     │
-└──────────────┬──────────────────────────────────────────┘
-               │  stdio 管道 / HTTPS (Streamable HTTP)
-               │
-┌──────────────▼──────────────────────────────────────────┐
-│                    mma-mcp 服务端                        │
-│                                                         │
-│  ┌─────────┐  ┌──────────────┐  ┌───────────────────┐  │
-│  │ OAuth   │  │ Bearer Auth  │  │ Starlette / stdio  │  │
-│  │ Server  │  │ Middleware   │  │ Transport          │  │
-│  └────┬────┘  └──────┬───────┘  └────────┬──────────┘  │
-│       │              │                    │             │
-│       └──────────────┼────────────────────┘             │
-│                      │ current_client (contextvar)      │
-│              ┌───────▼───────┐                          │
-│              │  Tool Router  │  角色权限检查              │
-│              │  _safe_wrapper│  _active_filter           │
-│              └───────┬───────┘                          │
-│                      │                                  │
-│         ┌────────────▼────────────┐                     │
-│         │   ExpressionFilter      │  AST 符号提取        │
-│         │   (per-role or global)  │  + 黑/白名单校验     │
-│         └────────────┬────────────┘                     │
-│                      │  clean expression                │
-│              ┌───────▼───────┐                          │
-│              │  KernelPool   │  worker 池         │
-│              │  (pool.py)    │  进程级隔离               │
-│              └───────┬───────┘                          │
-│                      │  acquire → execute → release     │
-└──────────────────────┼──────────────────────────────────┘
-                       │
-          ┌────────────▼────────────┐
-          │ Worker 1 ... Worker N   │  独立 KernelSession
-          │ (auto-restart, 定期回收) │
-          └────────────┬────────────┘
-                       │
-               ┌───────▼───────┐
-               │ Wolfram Engine │  MathKernel × N
-               └───────────────┘
++-----------------------------------------------------------+
+|                      MCP Clients                          |
+|  Claude Desktop / Claude Code / Claude.ai / ChatGPT      |
++--------------+--------------------------------------------+
+               |  stdio pipe / HTTPS (Streamable HTTP)
+               |
++--------------v--------------------------------------------+
+|                     mma-mcp Server                        |
+|                                                           |
+|  +---------+  +--------------+  +-------------------+    |
+|  | OAuth   |  | Bearer Auth  |  | Starlette / stdio |    |
+|  | Server  |  | Middleware   |  | Transport         |    |
+|  +----+----+  +------+-------+  +--------+----------+    |
+|       |              |                    |               |
+|       +--------------+--------------------+               |
+|                      | current_client (contextvar)        |
+|              +-------v-------+                            |
+|              |  Tool Router  |  Role permission check     |
+|              |  _safe_wrapper|  _active_filter             |
+|              +-------+-------+                            |
+|                      |                                    |
+|         +------------v------------+                       |
+|         |   ExpressionFilter      |  Symbol extraction    |
+|         |   (per-role or global)  |  + blacklist/whitelist |
+|         +------------+-----------+                        |
+|                      |  clean expression                  |
+|              +-------v-------+                            |
+|              |  KernelPool   |  Worker pool               |
+|              |  (pool.py)    |  Process-level isolation    |
+|              +-------+-------+                            |
+|                      |  acquire -> execute -> release     |
++----------------------+------------------------------------+
+                       |
+          +------------v------------+
+          | Worker 1 ... Worker N   |  Independent KernelSession
+          | (auto-restart, reclaim) |
+          +------------+------------+
+                       |
+               +-------v-------+
+               | Wolfram Engine |  MathKernel x N
+               +---------------+
 ```
 
 ---
 
-## 模块职责
+## Module Responsibilities
 
-### 核心模块
+### Core Modules
 
-| 模块 | 文件 | 职责 |
-|------|------|------|
-| **Server** | `server.py` | `App` 类封装服务器全生命周期；CLI 入口 (`main`)；argparse 子命令；HTTP/stdio 启动 |
-| **Config** | `config.py` | TOML 配置加载/校验/默认值生成；所有 dataclass 定义（Kernel/Server/TLS/Security/Tools/Auth/Role/Client） |
-| **Kernel** | `kernel.py` | `KernelSession` 管理单个 Wolfram 内核生命周期；自动探测内核路径；崩溃自动重启；Python 侧硬超时 |
-| **Pool** | `pool.py` | `KernelPool` worker 池；懒创建、独占使用、临时上下文清理、定期重启、空闲回收；进程级隔离 |
+| Module | File | Responsibility |
+|--------|------|----------------|
+| **Server** | `server.py` | `App` class managing server lifecycle; CLI entry point (`main`); argparse subcommands; HTTP/stdio startup |
+| **Config** | `config.py` | TOML config loading/validation/default generation; all dataclass definitions (Kernel/Server/TLS/Security/Tools/Auth/Role/Client) |
+| **Kernel** | `kernel.py` | `KernelSession` managing a single Wolfram kernel lifecycle; auto-detect kernel path; crash auto-restart; Python-side hard timeout |
+| **Pool** | `pool.py` | `KernelPool` worker pool; lazy creation, exclusive use, temporary context cleanup, periodic restart, idle reclaim; process-level isolation |
 
-### 安全模块
+### Security Modules
 
-| 模块 | 文件 | 职责 |
-|------|------|------|
-| **Filter** | `security/filter.py` | `ExpressionFilter`：正则提取 WL 符号 → 黑/白名单校验；处理 `Symbol["X"]` 和 `<<` 语法糖 |
-| **Registry** | `security/registry.py` | `CapabilityRegistry`：加载分组 JSON → 构建 `ExpressionFilter`；支持多次 `build_filter` 生成不同策略 |
-| **Groups** | `security/groups/*.json` | 29 个预生成的符号分组（22 安全 + 7 危险），由 `mma-mcp setup` 基于 WolframLanguageData 生成 |
+| Module | File | Responsibility |
+|--------|------|----------------|
+| **Filter** | `security/filter.py` | `ExpressionFilter`: regex symbol extraction -> blacklist/whitelist check; handles `Symbol["X"]` and `<<` syntax |
+| **Registry** | `security/registry.py` | `CapabilityRegistry`: loads group JSONs -> builds `ExpressionFilter`; supports multiple `build_filter` calls for different policies |
+| **Groups** | `security/groups/*.json` | 29 pre-generated symbol groups (22 safe + 7 dangerous), generated by `mma-mcp setup` from WolframLanguageData |
 
-### 认证模块
+### Authentication Modules
 
-| 模块 | 文件 | 职责 |
-|------|------|------|
-| **Auth** | `auth.py` | `BearerAuthMiddleware`：Bearer token 验证；`ClientIdentity` + `current_client` contextvar 传递客户端身份 |
-| **OAuth** | `oauth.py` | 最小 OAuth 2.1 服务器：元数据发现、DCR、Authorization Code + PKCE；多客户端/单密码双模式；token 和 DCR 客户端持久化到 SQLite（WAL 模式） |
-| **Passwords** | `passwords.py` | `hash_password` / `verify_password`：stdlib `hashlib.scrypt`，零外部依赖 |
+| Module | File | Responsibility |
+|--------|------|----------------|
+| **Auth** | `auth.py` | `BearerAuthMiddleware`: Bearer token verification; `ClientIdentity` + `current_client` contextvar for client identity propagation |
+| **OAuth** | `oauth.py` | Minimal OAuth 2.1 server: metadata discovery, DCR, Authorization Code + PKCE; multi-client/single-password dual mode; tokens and DCR clients persisted to SQLite (WAL mode) |
+| **Passwords** | `passwords.py` | `hash_password` / `verify_password`: stdlib `hashlib.scrypt`, zero external dependencies |
 
-### 工具模块
+### Tool Modules
 
-| 模块 | 文件 | 职责 |
-|------|------|------|
-| **Registry** | `tools/__init__.py` | `@register` 装饰器 + `_REGISTRY`；`ToolContext` 运行时上下文（含结果截断）；`RoleRuntime` 角色权限；`_safe_wrapper` 错误捕获 + RBAC |
-| **Evaluate** | `tools/evaluate.py` | `evaluate`（文本结果）、`evaluate_image`（PNG 图片）——所有 Wolfram Language 功能通过这两个通用工具访问 |
+| Module | File | Responsibility |
+|--------|------|----------------|
+| **Registry** | `tools/__init__.py` | `@register` decorator + `_REGISTRY`; `ToolContext` runtime context (with result truncation); `RoleRuntime` role permissions; `_safe_wrapper` error handling + RBAC |
+| **Evaluate** | `tools/evaluate.py` | `evaluate` (text result), `evaluate_image` (PNG image) — all Wolfram Language capabilities accessed through these two universal tools |
 
-### 辅助模块
+### Auxiliary Modules
 
-| 模块 | 文件 | 职责 |
-|------|------|------|
-| **Stdio Transport** | `stdio_transport.py` | 自定义 stdio 传输，解决 MCP SDK 在管道环境（VSCode）下的挂起问题 |
-| **Caddyfile** | `caddyfile.py` | 根据配置生成 Caddy HTTPS 配置，支持 5 种 DNS 提供商的 DNS-01 证书申请 |
-| **Setup** | `setup_groups.py` | 从本地内核查询 WolframLanguageData FunctionalityAreas 重新生成安全分组 JSON |
-
----
-
-## 关键设计决策
-
-### 1. 前置安全过滤（Python 层解析，内核不参与）
-
-```
-输入 → Python 正则提取符号 → 策略校验 → 通过后才发给内核
-```
-
-**为什么不在内核内过滤？** Wolfram Language 是图灵完备的，在内核内沙箱化极其困难——`ToExpression`、`Symbol` 等元编程功能可以绕过几乎任何内核级限制。在 Python 层做静态符号分析虽然不完美（无法捕获所有动态构造），但对 AI 生成的表达式足够有效，因为 AI 不会刻意混淆。
-
-**已知局限**：动态字符串拼接构造符号名（如 `ToExpression["Ru" <> "n"]`）无法被静态分析捕获。因此 `ToExpression` 本身被归入 `dynamic_eval` 危险组，默认阻断。
-
-### 2. Worker 池（内核进程级隔离）
-
-借鉴 Apache prefork MPM，`KernelPool`（`pool.py`）维护多个独立的 `KernelSession` worker 进程，每次工具调用独占一个 worker，用完清理归还。
-
-```
-工具调用 → pool.worker() acquire → 独占 KernelSession
-       → 临时上下文 Pool$<random>` 内执行
-       → Remove["Pool$...`*"] 清理
-       → release 归还池
-```
-
-**为什么不用单内核 + context 分区？** `Block[{$Context}]` 只改变默认符号命名空间，不阻止跨 context 访问。进程级隔离从根本上消除跨客户端符号空间的攻击面。
-
-**池行为**：
-- **懒创建**：启动时只创建 `pool_min_idle`（默认 1）个 worker，并发请求到来时按需扩到 `pool_size`
-- **独占使用**：每次工具调用从池中 acquire 一个空闲 worker，评估期间其他请求不能共享该 worker
-- **调用清理**：每次调用用随机临时上下文 `Pool$<hex>`，执行后 `Remove["Pool$...`*"]`
-- **定期重启**：worker 处理 `max_requests_per_worker`（默认 100）次后重启内核进程，兜底重置所有内核状态
-- **空闲回收**：超过 `pool_min_idle` 的空闲 worker 在 idle timeout 后关闭
-
-**内存实测**：空闲 WolframKernel 进程 RSS 仅 10-20MB，中度使用 ~200MB，重度可达 ~800MB。池大小默认 4（`min(cpu_count, 4)`），空闲状态总开销 < 100MB。
-
-**隔离边界**：临时上下文清理覆盖用户定义的符号。`System\`` 级别的状态修改（如 `SetOptions`、`Unprotect`）由安全过滤器的 `system_mutation` 危险组在前端阻断，`max_requests_per_worker` 定期重启作为兜底。
-
-### 3. 配置驱动而非代码驱动
-
-所有行为（传输方式、安全策略、工具启用、客户端权限）均通过 `mma_mcp.toml` 控制。
-
-- **新增工具**：写函数 + `@register` → 配置 `enabled` 列表启用。
-- **调整安全**：改 `deny_groups` / `allow_groups`，无需理解过滤器代码。
-- **管理客户端**：`mma-mcp add-client` 生成 TOML 片段，粘贴到配置文件。
-
-### 4. OAuth 2.1 + 静态 token 双模式认证
-
-Web MCP 客户端（Claude.ai、ChatGPT）要求标准 OAuth 2.1 流程，不支持自定义 header。因此项目内置了一个最小 OAuth 服务器，同时保留静态 Bearer token 兼容 CLI 客户端。
-
-- **Web 客户端**：标准 OAuth（元数据发现 → DCR → 授权页面 → PKCE token 交换）
-- **CLI 客户端**：`Authorization: Bearer base64(client_id:password)`
-- **旧模式兼容**：不配 `[auth]` 段时，退化为单密码 + 环境变量
-
-### 5. 角色权限通过 contextvars 传递
-
-`current_client` contextvar 在认证中间件中设置，在工具 wrapper 中读取。每个请求选择对应角色的 `ExpressionFilter`，通过 `_active_filter` contextvar 传递给 `ToolContext.check()`。
-
-- **为什么不直接在 ToolContext 上切换 filter？** 并发请求共享同一个 `ToolContext` 实例，直接修改 `expr_filter` 属性会导致竞态条件。contextvar 是 per-async-task 的，天然并发安全。
-
-### 6. 自定义 stdio 传输
-
-MCP SDK 的默认 stdio transport 在管道环境（VSCode 扩展）下会挂起。项目实现了 `stdio_transport.py`，使用 `asyncio.connect_read_pipe` 和直接 `stdout.buffer` 写入，解决了这个问题。
+| Module | File | Responsibility |
+|--------|------|----------------|
+| **Stdio Transport** | `stdio_transport.py` | Custom stdio transport, fixes MCP SDK pipe hang in VSCode environments |
+| **Caddyfile** | `caddyfile.py` | Generates Caddy HTTPS config from settings; supports 5 DNS providers for DNS-01 certificate acquisition |
+| **Setup** | `setup_groups.py` | Queries WolframLanguageData FunctionalityAreas from local kernel to regenerate security group JSONs |
 
 ---
 
-## 安全模型
+## Key Design Decisions
 
-### 分层防御
+### 1. Pre-Kernel Security Filtering (Python-layer parsing, kernel not involved)
 
 ```
-Layer 1: 认证 (auth.py)
-  └─ Bearer token / OAuth → 确认客户端身份
-
-Layer 2: 角色权限 (tools/__init__.py)
-  └─ 工具级访问控制 → 角色能调哪些 MCP tool
-
-Layer 3: 表达式过滤 (security/)
-  └─ 符号级控制 → 角色的表达式能使用哪些 WL 函数
+Input -> Python regex symbol extraction -> Policy check -> Only passes to kernel if approved
 ```
 
-### 符号分组
+**Why not filter inside the kernel?** Wolfram Language is Turing-complete, making kernel-level sandboxing extremely difficult — metaprogramming features like `ToExpression` and `Symbol` can bypass almost any in-kernel restriction. Python-layer static symbol analysis, while imperfect (cannot catch all dynamic constructions), is effective enough for AI-generated expressions, since AI assistants don't deliberately obfuscate.
 
-29 个预定义分组（基于 WolframLanguageData FunctionalityAreas），分为安全和危险两类：
+**Known limitation**: Dynamic string concatenation to construct symbol names (e.g., `ToExpression["Ru" <> "n"]`) cannot be caught by static analysis. Therefore `ToExpression` itself is included in the `dynamic_eval` dangerous group, blocked by default.
 
-**安全（22 组，默认允许）**：math_core, algebra, calculus, linear_algebra, statistics, number_theory, combinatorics, data_structures, programming, visualization, graph_theory, geometry, optimization, signal_processing, image, machine_learning, chemistry_biology, quantitative, compile, crypto, fractal, interpolation
+### 2. Worker Pool (Kernel Process-Level Isolation)
 
-**危险（7 组，默认阻断）**：system_exec, dynamic_eval, file_write, file_read, networking, external_services, system_mutation
+Inspired by Apache prefork MPM, `KernelPool` (`pool.py`) maintains multiple independent `KernelSession` worker processes. Each tool call exclusively acquires a worker, uses it, cleans up, and returns it.
 
-### 两种过滤模式
+```
+Tool call -> pool.worker() acquire -> exclusive KernelSession
+          -> execute in temporary context Pool$<random>`
+          -> Remove["Pool$...`*"] cleanup
+          -> release back to pool
+```
 
-- **黑名单**（默认）：只阻断危险分组中的符号，其余全部允许。
-- **白名单**：只允许指定分组中的符号，其余全部阻断。适合受限环境。
+**Why not single kernel + context partitioning?** `Block[{$Context}]` only changes the default symbol namespace; it doesn't prevent cross-context access. Process-level isolation fundamentally eliminates the cross-client symbol space attack surface.
 
-每个角色可独立选择模式和分组，也可继承全局设置。`security = "none"` 跳过过滤（管理员）。
+**Pool behavior**:
+- **Lazy creation**: starts with `pool_min_idle` (default 1) workers, scales up to `pool_size` on demand
+- **Exclusive use**: each tool call acquires an idle worker; no sharing during evaluation
+- **Per-call cleanup**: each call uses a random temporary context `Pool$<hex>`, cleaned up with `Remove["Pool$...`*"]` after execution
+- **Periodic restart**: workers restart after `max_requests_per_worker` (default 100) evaluations, fully resetting all kernel state
+- **Idle reclaim**: workers beyond `pool_min_idle` are shut down after idle timeout
+
+**Memory profile**: idle WolframKernel process RSS is only 10-20MB, moderate use ~200MB, heavy use up to ~800MB. Default pool size is 4 (`min(cpu_count, 4)`), idle overhead < 100MB total.
+
+**Isolation boundary**: Temporary context cleanup covers user-defined symbols. `System`` level state mutations (e.g., `SetOptions`, `Unprotect`) are blocked by the security filter's `system_mutation` dangerous group at the front end; `max_requests_per_worker` periodic restart serves as a backstop.
+
+### 3. Config-Driven, Not Code-Driven
+
+All behavior (transport mode, security policy, tool enablement, client permissions) is controlled via `mma_mcp.toml`.
+
+- **Adding tools**: write a function + `@register` -> add to `enabled` list in config.
+- **Adjusting security**: change `deny_groups` / `allow_groups`, no need to understand filter code.
+- **Managing clients**: `mma-mcp add-client` generates a TOML snippet, paste into config file.
+
+### 4. OAuth 2.1 + Static Token Dual-Mode Authentication
+
+Web MCP clients (Claude.ai, ChatGPT) require standard OAuth 2.1 flows and don't support custom headers. The project includes a minimal OAuth server while retaining static Bearer token compatibility for CLI clients.
+
+- **Web clients**: standard OAuth (metadata discovery -> DCR -> login page -> PKCE token exchange)
+- **CLI clients**: `Authorization: Bearer base64(client_id:password)`
+- **Legacy compatibility**: without `[auth]` section, falls back to single password + environment variable
+
+### 5. Role Permissions via contextvars
+
+`current_client` contextvar is set in the auth middleware and read in the tool wrapper. Each request selects the corresponding role's `ExpressionFilter`, passed to `ToolContext.check()` via the `_active_filter` contextvar.
+
+- **Why not switch filter directly on ToolContext?** Concurrent requests share the same `ToolContext` instance. Directly modifying `expr_filter` would cause race conditions. contextvars are per-async-task, naturally concurrent-safe.
+
+### 6. Custom stdio Transport
+
+The MCP SDK's default stdio transport hangs in pipe environments (VSCode extensions). The project implements `stdio_transport.py` using `asyncio.connect_read_pipe` and direct `stdout.buffer` writes to solve this.
 
 ---
 
-## 传输与部署
+## Security Model
 
-### 两种传输模式
-
-| 模式 | 启动方式 | 适用场景 |
-|------|----------|----------|
-| **stdio** | `mma-mcp` 或 `mma-mcp serve` | 本地 MCP 客户端（Claude Desktop、Claude Code、VSCode） |
-| **HTTP** | `mma-mcp serve --transport http` | 需要通过 HTTPS 连接的 MCP 客户端 |
-
-### HTTPS 部署架构
+### Layered Defense
 
 ```
-客户端 → Caddy (TLS 终结, Let's Encrypt) → 127.0.0.1:8000 (mma-mcp HTTP)
+Layer 1: Authentication (auth.py)
+  +-- Bearer token / OAuth -> confirm client identity
+
+Layer 2: Role Permissions (tools/__init__.py)
+  +-- Tool-level access control -> which MCP tools a role can call
+
+Layer 3: Expression Filtering (security/)
+  +-- Symbol-level control -> which WL functions a role's expressions can use
 ```
 
-- Caddy 处理 HTTPS 和证书自动续期（DNS-01 或 HTTP-01）
-- mma-mcp 只监听 localhost，由 Caddy 做 TLS 终结
-- `mma-mcp caddyfile` 命令根据配置自动生成 Caddyfile
+### Symbol Groups
+
+29 predefined groups (derived from WolframLanguageData FunctionalityAreas), divided into safe and dangerous:
+
+**Safe (22 groups, allowed by default)**: math_core, algebra, calculus, linear_algebra, statistics, number_theory, combinatorics, data_structures, programming, visualization, graph_theory, geometry, optimization, signal_processing, image, machine_learning, chemistry_biology, quantitative, compile, crypto, fractal, interpolation
+
+**Dangerous (7 groups, blocked by default)**: system_exec, dynamic_eval, file_write, file_read, networking, external_services, system_mutation
+
+### Two Filtering Modes
+
+- **Blacklist (default)**: blocks only symbols in dangerous groups, allows everything else.
+- **Whitelist**: allows only symbols in specified groups, blocks everything else. For restricted environments.
+
+Each role can independently choose mode and groups, or inherit the global setting. `security = "none"` skips filtering (admin).
 
 ---
 
-## 配置概览
+## Transport & Deployment
 
-所有配置集中在 `mma_mcp.toml`（`mma-mcp init` 生成），结构如下：
+### Two Transport Modes
+
+| Mode | Command | Use Case |
+|------|---------|----------|
+| **stdio** | `mma-mcp` or `mma-mcp serve` | Local MCP clients (Claude Desktop, Claude Code, VSCode) |
+| **HTTP** | `mma-mcp serve --transport http` | MCP clients connecting via HTTPS |
+
+### HTTPS Deployment Architecture
+
+```
+Client -> Caddy (TLS termination, Let's Encrypt) -> 127.0.0.1:8000 (mma-mcp HTTP)
+```
+
+- Caddy handles HTTPS and automatic certificate renewal (DNS-01 or HTTP-01)
+- mma-mcp only listens on localhost, Caddy handles TLS termination
+- `mma-mcp caddyfile` command auto-generates Caddyfile from config
+
+---
+
+## Configuration Overview
+
+All configuration is centralized in `mma_mcp.toml` (generated by `mma-mcp init`):
 
 ```toml
-[kernel]          # 内核路径、超时（WL 侧 + Python 侧硬超时）、结果大小限制、默认输出格式
-[server]          # 传输模式、监听地址、旧式单密码认证
-[tls]             # HTTPS 域名、DNS 提供商（用于 Caddyfile 生成）
-[security]        # 全局安全策略：模式 + 分组 + 符号级覆盖
-[tools]           # 启用的 MCP 工具列表
-[auth]            # 客户端认证开关
-[auth.roles.*]    # 角色定义：工具权限 + 安全策略覆盖
-[auth.clients.*]  # 客户端定义：角色绑定 + 密码哈希
+[kernel]          # Kernel path, timeout (WL-side + Python-side hard timeout), result size limit, default output format
+[server]          # Transport mode, listen address, legacy single-password auth
+[tls]             # HTTPS domain, DNS provider (for Caddyfile generation)
+[security]        # Global security policy: mode + groups + per-symbol overrides
+[tools]           # Enabled MCP tools list
+[auth]            # Client authentication toggle
+[auth.roles.*]    # Role definitions: tool permissions + security policy override
+[auth.clients.*]  # Client definitions: role binding + password hash
 ```
 
 ---
 
-## CLI 命令
+## CLI Commands
 
-| 命令 | 说明 |
-|------|------|
-| `mma-mcp` / `mma-mcp serve` | 启动 MCP 服务器 |
-| `mma-mcp init` | 生成默认 `mma_mcp.toml` |
-| `mma-mcp setup` | 从本地内核重新生成安全分组 JSON |
-| `mma-mcp caddyfile` | 根据 TLS 配置生成 Caddyfile |
-| `mma-mcp hash-password` | 交互式哈希密码 |
-| `mma-mcp add-client <id> --role <role>` | 生成客户端 TOML 片段 |
+| Command | Description |
+|---------|-------------|
+| `mma-mcp` / `mma-mcp serve` | Start the MCP server |
+| `mma-mcp init` | Generate default `mma_mcp.toml` |
+| `mma-mcp setup` | Regenerate security group JSONs from local kernel |
+| `mma-mcp caddyfile` | Generate Caddyfile from TLS config |
+| `mma-mcp hash-password` | Interactively hash a password |
+| `mma-mcp add-client <id> --role <role>` | Generate client TOML snippet |
 
 ---
 
-## 扩展指南
+## Extension Guide
 
-### 添加新工具
+### Adding a New Tool
 
-1. 在 `tools/` 下新建模块，用 `@register("tool_name")` 装饰函数：
+1. Create a new module in `tools/`, decorate the function with `@register("tool_name")`:
    ```python
    @register("my_tool")
    def my_tool(ctx: ToolContext, expression: str) -> str:
-       ctx.check(expression)  # 安全过滤
+       ctx.check(expression)  # Security filtering
        with ctx.pool.worker() as (kernel, wl_context):
            return kernel.evaluate_to_string(expression, ctx.default_format,
                                             timeout=ctx.timeout, context=wl_context)
    ```
-2. 在 `tools/__init__.py` 的 `register_tools` 中导入该模块。
-3. 在 `mma_mcp.toml` 的 `[tools] enabled` 中添加 `"my_tool"`。
+2. Import the module in `tools/__init__.py`'s `register_tools`.
+3. Add `"my_tool"` to `[tools] enabled` in `mma_mcp.toml`.
 
-### 添加新安全分组
+### Adding a New Security Group
 
-1. 运行 `mma-mcp setup` 从本地内核重新生成所有分组 JSON。
-2. 或手动在 `security/groups/` 下添加 JSON 文件（符号名列表）。
-3. 在 `manifest.json` 中添加分组元数据。
-4. 分组名自动可用于配置文件中的 `allow_groups` / `deny_groups`。
+1. Run `mma-mcp setup` to regenerate all group JSONs from the local kernel.
+2. Or manually add a JSON file (list of symbol names) in `security/groups/`.
+3. Add group metadata in `manifest.json`.
+4. The group name is automatically available for `allow_groups` / `deny_groups` in config.

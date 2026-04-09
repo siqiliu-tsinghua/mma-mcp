@@ -1,5 +1,7 @@
 # mma-mcp
 
+[Chinese / 中文版](README-cn.md)
+
 A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that wraps a local **Wolfram Engine**, enabling AI assistants (Claude, ChatGPT, etc.) to perform symbolic math, numerical analysis, and data visualization via Wolfram Language.
 
 > **Disclaimer:** This is an **unofficial**, independent, personal project.
@@ -23,7 +25,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that w
 
 - **MCP Tools**: `evaluate` (text) and `evaluate_image` (PNG) — all Wolfram Language capabilities through two universal tools
 - **Transports**: stdio (local) and Streamable HTTP
-- **Security**: Pre-kernel expression filtering with blacklist/whitelist modes and 28 capability groups
+- **Security**: Pre-kernel expression filtering with blacklist/whitelist modes and 29 capability groups
 - **Client RBAC**: Per-client credentials, per-role tool and security policy control — for isolating different AI clients on the same machine
 - **OAuth 2.1**: Authorization server for web-based MCP clients (Claude.ai, ChatGPT)
 - **Config-driven**: Single TOML file controls all behavior
@@ -38,7 +40,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that w
 
 ```bash
 # Clone and install
-git clone https://github.com/your-org/mma-mcp.git
+git clone https://github.com/liusq7/mma-mcp.git
 cd mma-mcp
 uv sync
 
