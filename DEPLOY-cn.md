@@ -365,6 +365,8 @@ sudo journalctl -u caddy-mma --no-pager | tail -30
    - "画出 Sin[x] 在 0 到 2π 的图像"
    - "求解 x^2 - 5x + 6 = 0"
 
+> **ChatGPT 用户：** 在 ChatGPT 中使用 MCP 需要先到 Settings -> Apps -> Advanced settings 中打开 "Developer mode"，然后通过"Create app"添加 MCP 服务器连接。
+
 ---
 
 ## 十、fail2ban 防护（可选）

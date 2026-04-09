@@ -359,6 +359,8 @@ sudo journalctl -u caddy-mma --no-pager | tail -30
    - "Plot Sin[x] from 0 to 2 Pi"
    - "Solve x^2 - 5x + 6 = 0"
 
+> **ChatGPT users:** To use MCP in ChatGPT, first enable "Developer mode" in Settings -> Apps -> Advanced settings, then add the MCP server connection via "Create app".
+
 ---
 
 ## 10. fail2ban Protection (optional)
