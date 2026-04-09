@@ -11,6 +11,9 @@ Supports two modes:
     password, tokens carry client identity and role.
   - **Legacy single-password** (``password`` provided): login page shows
     password only.
+
+Tokens and DCR clients are persisted to SQLite so they survive process
+restarts.  Auth codes and login-failure counters remain in memory (short-lived).
 """
 
 from __future__ import annotations
@@ -18,8 +21,10 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import json
 import logging
 import secrets
+import sqlite3
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -36,13 +41,13 @@ logger = logging.getLogger(__name__)
 
 # Token / code lifetimes
 _CODE_TTL = 600  # 10 minutes
-_TOKEN_TTL = 86400  # 24 hours
+_TOKEN_TTL = 2592000  # 30 days
 
 # Brute-force protection
 _MAX_LOGIN_FAILURES = 5       # failures before lockout kicks in
 _MAX_LOCKOUT_SECS = 900       # 15 minute cap on lockout duration
 
-# Capacity limits — prevent unbounded memory growth
+# Capacity limits
 _MAX_DCR_CLIENTS = 100      # max dynamically registered OAuth clients
 _MAX_ACCESS_TOKENS = 1000   # max concurrent access tokens
 _MAX_AUTH_CODES = 200        # max pending authorization codes
@@ -58,19 +63,105 @@ class _AuthCode:
     role: str = ""
 
 
-@dataclass
-class _TokenInfo:
-    client_id: str
-    expires_at: float
-    client_name: str = ""
-    role: str = ""
+# ---------------------------------------------------------------------------
+# SQLite-backed token / client store
+# ---------------------------------------------------------------------------
+
+class _TokenStore:
+    """Thin SQLite wrapper for OAuth tokens and DCR clients.
+
+    All data survives process restarts.  WAL mode enables concurrent readers.
+    """
+
+    def __init__(self, db_path: str) -> None:
+        self._conn = sqlite3.connect(
+            db_path, check_same_thread=False, isolation_level="DEFERRED",
+        )
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._create_tables()
+        # Clean up expired entries left over from a previous run
+        self.evict_expired_tokens()
+        logger.info("OAuth store opened: %s", db_path)
+
+    def _create_tables(self) -> None:
+        self._conn.executescript("""
+            CREATE TABLE IF NOT EXISTS oauth_tokens (
+                token       TEXT PRIMARY KEY,
+                client_id   TEXT NOT NULL,
+                client_name TEXT NOT NULL DEFAULT '',
+                role        TEXT NOT NULL DEFAULT '',
+                expires_at  REAL NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS oauth_clients (
+                client_id     TEXT PRIMARY KEY,
+                redirect_uris TEXT NOT NULL DEFAULT '[]'
+            );
+        """)
+
+    # -- tokens --
+
+    def put_token(
+        self, token: str, client_id: str, client_name: str,
+        role: str, expires_at: float,
+    ) -> None:
+        self._conn.execute(
+            "INSERT OR REPLACE INTO oauth_tokens "
+            "(token, client_id, client_name, role, expires_at) VALUES (?,?,?,?,?)",
+            (token, client_id, client_name, role, expires_at),
+        )
+        self._conn.commit()
+
+    def get_token(self, token: str) -> tuple[str, str, str, float] | None:
+        """Return (client_id, client_name, role, expires_at) or None."""
+        row = self._conn.execute(
+            "SELECT client_id, client_name, role, expires_at "
+            "FROM oauth_tokens WHERE token = ?", (token,),
+        ).fetchone()
+        return row
+
+    def delete_token(self, token: str) -> None:
+        self._conn.execute("DELETE FROM oauth_tokens WHERE token = ?", (token,))
+        self._conn.commit()
+
+    def count_tokens(self) -> int:
+        return self._conn.execute("SELECT COUNT(*) FROM oauth_tokens").fetchone()[0]
+
+    def evict_expired_tokens(self) -> int:
+        cur = self._conn.execute(
+            "DELETE FROM oauth_tokens WHERE expires_at <= ?", (time.time(),),
+        )
+        self._conn.commit()
+        return cur.rowcount
+
+    # -- clients --
+
+    def put_client(self, client_id: str, redirect_uris: list[str]) -> None:
+        self._conn.execute(
+            "INSERT OR REPLACE INTO oauth_clients (client_id, redirect_uris) VALUES (?,?)",
+            (client_id, json.dumps(redirect_uris)),
+        )
+        self._conn.commit()
+
+    def get_client(self, client_id: str) -> tuple[str, list[str]] | None:
+        """Return (client_id, redirect_uris) or None."""
+        row = self._conn.execute(
+            "SELECT client_id, redirect_uris FROM oauth_clients WHERE client_id = ?",
+            (client_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return row[0], json.loads(row[1])
+
+    def count_clients(self) -> int:
+        return self._conn.execute("SELECT COUNT(*) FROM oauth_clients").fetchone()[0]
+
+    def close(self) -> None:
+        self._conn.close()
 
 
-@dataclass
-class _ClientInfo:
-    client_id: str
-    redirect_uris: list[str]
-
+# ---------------------------------------------------------------------------
+# OAuth server
+# ---------------------------------------------------------------------------
 
 class OAuthServer:
     """Minimal OAuth 2.1 authorization server.
@@ -84,15 +175,15 @@ class OAuthServer:
         self,
         password: str = "",
         auth_config: "AuthConfig | None" = None,
+        db_path: str = "mma_mcp_oauth.db",
     ) -> None:
         self._password = password
         self._auth_config = auth_config
         self._multi_client = auth_config is not None and auth_config.enabled
-        # In-memory stores (single process, no persistence needed)
-        self._clients: dict[str, _ClientInfo] = {}
+        # Persistent store (SQLite)
+        self._store = _TokenStore(db_path)
+        # In-memory only (short-lived, not worth persisting)
         self._auth_codes: dict[str, _AuthCode] = {}
-        self._access_tokens: dict[str, _TokenInfo] = {}
-        # Brute-force protection: {username: (failure_count, lockout_until)}
         self._login_failures: dict[str, tuple[int, float]] = {}
 
     @property
@@ -104,20 +195,17 @@ class OAuthServer:
     # ------------------------------------------------------------------
 
     def _evict_expired(self) -> None:
-        """Remove expired tokens and auth codes. Called periodically."""
+        """Remove expired tokens and auth codes."""
+        n_tokens = self._store.evict_expired_tokens()
         now = time.time()
-        expired_tokens = [k for k, v in self._access_tokens.items()
-                          if now >= v.expires_at]
-        for k in expired_tokens:
-            del self._access_tokens[k]
         expired_codes = [k for k, v in self._auth_codes.items()
                          if now >= v.expires_at]
         for k in expired_codes:
             del self._auth_codes[k]
-        if expired_tokens or expired_codes:
+        if n_tokens or expired_codes:
             logger.debug(
                 "Evicted %d expired tokens, %d expired codes",
-                len(expired_tokens), len(expired_codes),
+                n_tokens, len(expired_codes),
             )
 
     # ------------------------------------------------------------------
@@ -128,26 +216,28 @@ class OAuthServer:
         """Return True if *token* is valid (legacy mode only)."""
         if self._password and hmac.compare_digest(token, self._password):
             return True
-        info = self._access_tokens.get(token)
-        if info is not None:
-            if time.time() < info.expires_at:
+        row = self._store.get_token(token)
+        if row is not None:
+            _, _, _, expires_at = row
+            if time.time() < expires_at:
                 return True
-            del self._access_tokens[token]
+            self._store.delete_token(token)
         return False
 
     def get_token_client(self, token: str) -> "ClientIdentity | None":
         """Return the ClientIdentity for an OAuth-issued token, or None."""
         from mma_mcp.auth import ClientIdentity
 
-        info = self._access_tokens.get(token)
-        if info is None:
+        row = self._store.get_token(token)
+        if row is None:
             return None
-        if time.time() >= info.expires_at:
-            del self._access_tokens[token]
+        client_id, client_name, role, expires_at = row
+        if time.time() >= expires_at:
+            self._store.delete_token(token)
             return None
-        if not info.client_name:
+        if not client_name:
             return None
-        return ClientIdentity(client_id=info.client_name, role=info.role)
+        return ClientIdentity(client_id=client_name, role=role)
 
     # ------------------------------------------------------------------
     # Starlette routes
@@ -188,8 +278,8 @@ class OAuthServer:
         except Exception:
             return JSONResponse({"error": "invalid_request"}, status_code=400)
 
-        # Capacity check — prevent unbounded memory growth from DCR spam
-        if len(self._clients) >= _MAX_DCR_CLIENTS:
+        # Capacity check
+        if self._store.count_clients() >= _MAX_DCR_CLIENTS:
             logger.warning("DCR: capacity limit reached (%d clients)", _MAX_DCR_CLIENTS)
             return JSONResponse(
                 {"error": "server_error",
@@ -204,10 +294,7 @@ class OAuthServer:
                 {"error": "invalid_client_metadata"}, status_code=400,
             )
 
-        self._clients[client_id] = _ClientInfo(
-            client_id=client_id,
-            redirect_uris=redirect_uris,
-        )
+        self._store.put_client(client_id, redirect_uris)
         logger.info("DCR: registered client %s", client_id)
 
         return JSONResponse({
@@ -253,10 +340,11 @@ class OAuthServer:
             return HTMLResponse("Missing redirect_uri or client_id", status_code=400)
 
         # Validate client_id is registered and redirect_uri matches
-        client = self._clients.get(client_id)
+        client = self._store.get_client(client_id)
         if client is None:
             return HTMLResponse("Unknown client_id", status_code=400)
-        if redirect_uri not in client.redirect_uris:
+        _, registered_uris = client
+        if redirect_uri not in registered_uris:
             logger.warning(
                 "OAuth: redirect_uri %r not in registered URIs for client %s",
                 redirect_uri, client_id,
@@ -342,7 +430,7 @@ class OAuthServer:
 
         # Evict expired tokens before issuing new one
         self._evict_expired()
-        if len(self._access_tokens) >= _MAX_ACCESS_TOKENS:
+        if self._store.count_tokens() >= _MAX_ACCESS_TOKENS:
             return JSONResponse(
                 {"error": "server_error",
                  "error_description": "Too many active tokens"},
@@ -351,11 +439,12 @@ class OAuthServer:
 
         # Issue access token
         access_token = secrets.token_urlsafe(48)
-        self._access_tokens[access_token] = _TokenInfo(
+        self._store.put_token(
+            token=access_token,
             client_id=client_id,
-            expires_at=time.time() + _TOKEN_TTL,
             client_name=auth_code.client_name,
             role=auth_code.role,
+            expires_at=time.time() + _TOKEN_TTL,
         )
         logger.info(
             "Issued access token for client=%s role=%s oauth_client=%s",

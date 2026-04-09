@@ -75,16 +75,16 @@ class TestPKCE:
 class TestOAuthServerLegacy:
 
     def test_validate_token_with_password(self):
-        srv = OAuthServer(password="my-secret")
+        srv = OAuthServer(password="my-secret", db_path=":memory:")
         assert srv.validate_token("my-secret")
         assert not srv.validate_token("wrong")
 
     def test_get_token_client_returns_none_legacy(self):
-        srv = OAuthServer(password="my-secret")
+        srv = OAuthServer(password="my-secret", db_path=":memory:")
         assert srv.get_token_client("anything") is None
 
     def test_multi_client_is_false(self):
-        srv = OAuthServer(password="my-secret")
+        srv = OAuthServer(password="my-secret", db_path=":memory:")
         assert not srv.multi_client
 
 
@@ -105,7 +105,7 @@ class TestOAuthServerMultiClient:
 
     @pytest.fixture
     def srv(self, auth_config):
-        return OAuthServer(auth_config=auth_config)
+        return OAuthServer(auth_config=auth_config, db_path=":memory:")
 
     def test_multi_client_is_true(self, srv):
         assert srv.multi_client
@@ -215,18 +215,14 @@ class TestOAuthClientValidation:
             roles={"admin": RoleConfig(tools="*", security="none")},
             clients={"alice": ClientConfig(role="admin", password_hash=pwd_hash)},
         )
-        return OAuthServer(auth_config=config)
+        return OAuthServer(auth_config=config, db_path=":memory:")
 
     def _register_client(self, srv, redirect_uris=None):
         """Helper: register a client and return (client_id, redirect_uris)."""
         if redirect_uris is None:
             redirect_uris = ["https://example.com/callback"]
         client_id = "test-client-id"
-        from mma_mcp.oauth import _ClientInfo
-        srv._clients[client_id] = _ClientInfo(
-            client_id=client_id,
-            redirect_uris=redirect_uris,
-        )
+        srv._store.put_client(client_id, redirect_uris)
         return client_id, redirect_uris
 
     def _make_form(self, **kwargs):
