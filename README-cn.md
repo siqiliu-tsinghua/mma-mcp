@@ -40,6 +40,9 @@ git clone https://github.com/<owner>/mma-mcp.git
 cd mma-mcp
 uv sync
 
+# 图形导出依赖（仅无头服务器需要——桌面环境已自带）
+sudo apt-get install -y libfontconfig1 libgl1 libasound2t64 libxkbcommon0 libegl1
+
 # 生成默认配置
 uv run mma-mcp init
 

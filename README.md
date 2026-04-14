@@ -44,6 +44,9 @@ git clone https://github.com/<owner>/mma-mcp.git
 cd mma-mcp
 uv sync
 
+# Graphics export dependencies (headless servers only — desktops already have these)
+sudo apt-get install -y libfontconfig1 libgl1 libasound2t64 libxkbcommon0 libegl1
+
 # Generate default config
 uv run mma-mcp init
 

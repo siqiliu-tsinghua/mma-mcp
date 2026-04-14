@@ -101,6 +101,7 @@ def generate_caddyfile(config: AppConfig, target: Path | None = None) -> Path:
     parts.append(f"""\
 {tls.domain} {{
     reverse_proxy {upstream} {{
+        header_up X-Forwarded-Host {{host}}
         header_up Host {{upstream_hostport}}
     }}
 

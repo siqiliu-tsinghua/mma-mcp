@@ -11,6 +11,7 @@ Command-line flags override config file values.
 
 from __future__ import annotations
 
+import atexit
 import logging
 import os
 import sys
@@ -48,7 +49,7 @@ class App:
         self._pool: KernelPool | None = None
         self._ctx: ToolContext | None = None
         self._mcp: FastMCP | None = None
-        self._init_lock = threading.Lock()
+        self._init_lock = threading.RLock()
 
     # ------------------------------------------------------------------
     # Lazy-init components (double-checked locking)
@@ -190,7 +191,7 @@ class App:
                 oauth_server=oauth_server,
                 auth_config=self.config.auth,
             )
-            app.add_event_handler("shutdown", oauth_server.close)
+            atexit.register(oauth_server.close)
             logger.info(
                 "Client auth enabled (%d clients, %d roles)",
                 len(self.config.auth.clients), len(self.config.auth.roles),
@@ -217,7 +218,7 @@ class App:
         app.add_middleware(
             BearerAuthMiddleware, token=token, oauth_server=oauth_server,
         )
-        app.add_event_handler("shutdown", oauth_server.close)
+        atexit.register(oauth_server.close)
         logger.info("Legacy single-token auth enabled (env: %s)", token_env)
 
     # ------------------------------------------------------------------
@@ -239,7 +240,10 @@ class App:
             self.setup_http_auth(app)
 
             logger.info("Starting HTTP transport on %s:%d", host, port)
-            uvi_config = uvicorn.Config(app, host=host, port=port, log_level="info")
+            uvi_config = uvicorn.Config(
+                app, host=host, port=port, log_level="info",
+                proxy_headers=False,  # we handle X-Forwarded-* in _base_url()
+            )
             uvicorn.Server(uvi_config).run()
         else:
             async def run_stdio() -> None:

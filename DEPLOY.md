@@ -7,6 +7,10 @@
 ## Prerequisites
 
 - Debian / Ubuntu server with Wolfram Engine / Mathematica installed and licensed
+- Graphics export libraries (required for `evaluate_image` on headless servers):
+  ```bash
+  sudo apt-get install -y libfontconfig1 libgl1 libasound2t64 libxkbcommon0 libegl1
+  ```
 - A domain name pointing to your server's public IP
 - Port 443 available (and port 80 if using HTTP-01 challenge)
 
@@ -45,7 +49,7 @@ uv run mma-mcp setup
 #   TTL: 600
 
 # Verify DNS propagation
-dig mma.yourdomain.com +short
+dig mma.<your-domain> +short
 # Should return your server's public IP
 ```
 
@@ -73,7 +77,7 @@ port = 8000
 
 [tls]
 enabled = true
-domain = "mma.yourdomain.com"
+domain = "mma.<your-domain>"
 # dns_provider = ""  # see "TLS Certificate" section below
 ```
 
@@ -88,7 +92,7 @@ No DNS provider needed. Caddy validates domain ownership via port 80. Just leave
 ```toml
 [tls]
 enabled = true
-domain = "mma.yourdomain.com"
+domain = "mma.<your-domain>"
 # dns_provider not set -> HTTP-01 challenge (port 80 must be open)
 ```
 
@@ -113,7 +117,7 @@ Example with Alibaba Cloud DNS:
 ```toml
 [tls]
 enabled = true
-domain = "mma.yourdomain.com"
+domain = "mma.<your-domain>"
 dns_provider = "alidns"
 ```
 
@@ -132,23 +136,25 @@ mma-mcp supports two HTTP authentication modes:
 
 For accessing the same Wolfram kernel from multiple AI clients (e.g., Claude.ai and ChatGPT simultaneously). Each client gets independent credentials and optional permission policies.
 
+Step 1: Uncomment `[auth]` and `[auth.roles.default]` in `mma_mcp.toml` (they are pre-written as comments by `mma-mcp init`):
+
 ```toml
 [auth]
 enabled = true
 
-[auth.clients.claude]
-role = "default"
-password_hash = "scrypt:..."   # Generate with: mma-mcp hash-password
-
 [auth.roles.default]
 tools = "*"
-security = ""  # Empty string = inherit global security policy
+security = ""
 ```
 
-Generate a client config snippet:
+Step 2: Generate client credentials:
+
 ```bash
 uv run mma-mcp add-client claude --role default
-# Enter password at prompt, paste the output TOML into mma_mcp.toml
+# Enter password at prompt, paste the generated TOML into mma_mcp.toml
+
+# Add more clients as needed:
+uv run mma-mcp add-client chatgpt --role default
 ```
 
 Web clients (Claude.ai, etc.) will go through the OAuth 2.1 flow (DCR + PKCE + authorization code). Users enter client ID and password on the login page.
@@ -219,35 +225,35 @@ caddy version
 
 The environment file contains secrets that systemd services read at startup.
 
-**If using DNS-01**, include your DNS provider's API credentials (example: alidns):
-
 ```bash
-sudo tee /etc/default/mma-mcp > /dev/null << EOF
+sudo touch /etc/default/mma-mcp
+sudo chmod 600 /etc/default/mma-mcp
+sudo editor /etc/default/mma-mcp
+```
+
+**If using DNS-01**, add your DNS provider's API credentials (replace `<...>` with your actual keys):
+
+```
+# Example: Alibaba Cloud DNS
 ALIDNS_ACCESS_KEY_ID=<your-access-key-id>
 ALIDNS_ACCESS_KEY_SECRET=<your-access-key-secret>
-EOF
-sudo chmod 600 /etc/default/mma-mcp
 ```
 
 For other providers, use their respective environment variables (see the table in section 3).
 
-**If using HTTP-01**, the env file may be empty or contain only auth credentials:
+**If using HTTP-01**, the file can be left empty (or contain only auth credentials below).
+
+**If using static single token auth** (Mode B), add a token:
 
 ```bash
-sudo touch /etc/default/mma-mcp
-sudo chmod 600 /etc/default/mma-mcp
+# Generate a random token
+openssl rand -hex 32
 ```
 
-**If using static single token auth** (Mode B), also add the auth token:
+Copy the output and add it to `/etc/default/mma-mcp`:
 
-```bash
-MMA_MCP_AUTH_TOKEN=$(openssl rand -hex 32)
-echo "Save this token for Claude Web configuration:"
-echo "$MMA_MCP_AUTH_TOKEN"
-
-# Append to env file (or create it):
-echo "MMA_MCP_AUTH_TOKEN=$MMA_MCP_AUTH_TOKEN" | sudo tee -a /etc/default/mma-mcp > /dev/null
-sudo chmod 600 /etc/default/mma-mcp
+```
+MMA_MCP_AUTH_TOKEN=<paste-token-here>
 ```
 
 ---
@@ -293,6 +299,10 @@ ExecStart=/usr/local/bin/caddy run --config /opt/mma-mcp/Caddyfile
 Restart=on-failure
 RestartSec=5
 
+# Caddy data directories (mma user has no home directory)
+Environment=XDG_CONFIG_HOME=/opt/mma-mcp/.caddy/config
+Environment=XDG_DATA_HOME=/opt/mma-mcp/.caddy/data
+
 # Allow binding to port 443 without root
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
@@ -323,16 +333,16 @@ sudo journalctl -u caddy-mma -f
 
 ```bash
 # Check OAuth metadata endpoint (no auth required)
-curl -s https://mma.yourdomain.com/.well-known/oauth-authorization-server | python3 -m json.tool
+curl -s https://mma.<your-domain>/.well-known/oauth-authorization-server | python3 -m json.tool
 # Should return JSON with authorization_endpoint, token_endpoint, etc.
 
 # Check MCP endpoint (auth required, expect 401)
-curl -v https://mma.yourdomain.com/mcp
+curl -v https://mma.<your-domain>/mcp
 # Should return 401 Unauthorized
 
 # Mode B users can test directly with token:
 # source /etc/default/mma-mcp
-# curl -v -H "Authorization: Bearer $MMA_MCP_AUTH_TOKEN" https://mma.yourdomain.com/mcp
+# curl -v -H "Authorization: Bearer $MMA_MCP_AUTH_TOKEN" https://mma.<your-domain>/mcp
 # Should return 405 Method Not Allowed (MCP doesn't accept GET — service is working)
 
 # If certificate isn't issued, check Caddy logs:
@@ -345,14 +355,14 @@ sudo journalctl -u caddy-mma --no-pager | tail -30
 
 1. Go to https://claude.ai
 2. Settings -> Connectors -> Add custom connector
-3. URL: `https://mma.yourdomain.com/mcp`
+3. URL: `https://mma.<your-domain>/mcp`
 4. Complete the OAuth 2.1 authentication flow:
    - Mode A: enter client ID (e.g., `claude`) and password
    - Mode B: enter password only (the auth token)
-5. Test with a conversation:
-   - "Compute 1+1"
-   - "Plot Sin[x] from 0 to 2 Pi"
-   - "Solve x^2 - 5x + 6 = 0"
+5. Test with a conversation — use explicit Wolfram Language expressions to ensure the tool is invoked:
+   - "Use evaluate to run: `DSolve[y''[x] + x y[x] == 0, y[x], x]`"
+   - "Use evaluate to run: `Series[Exp[x], {x, 0, 5}]`"
+   - "Use evaluate_image to run: `Plot[Sin[x], {x, 0, 2 Pi}]`"
 
 > **ChatGPT users:** To use MCP in ChatGPT, first enable "Developer mode" in Settings -> Apps -> Advanced settings, then add the MCP server connection via "Create app".
 
@@ -456,7 +466,7 @@ sudo journalctl -u mma-mcp -e
 
 # Caddy certificate issuance fails
 # - Check DNS API credentials
-# - Verify A record: dig mma.yourdomain.com
+# - Verify A record: dig mma.<your-domain>
 # - Check environment variables: sudo cat /etc/default/mma-mcp
 
 # Kernel not found

@@ -461,6 +461,7 @@ idle_timeout = 0
 
 [server]
 # Transport mode: "stdio" (local MCP clients) or "http" (HTTP MCP clients)
+# transport = "http"
 transport = "stdio"
 
 # HTTP listen address (only used when transport = "http")
@@ -479,6 +480,7 @@ port = 8000
 # mma-mcp can generate a Caddyfile for automatic HTTPS via Let's Encrypt.
 
 [tls]
+# enabled = true
 enabled = false
 
 # Your domain for HTTPS, e.g. "mma-mcp.example.com"
@@ -557,36 +559,34 @@ enabled = [
 ]
 
 # ─── Authentication & Roles ─────────────────────────────────────────────────
-# Client identity and role-based access control for AI client isolation.
-# Each AI client (e.g. Claude, ChatGPT) connects with its own credentials
-# and is bound to a role that controls tool access and resource limits.
-# Generate password hashes with: mma-mcp hash-password
+# Client identity and role-based access control for HTTP transport.
+# Quick start:
+#   1. Uncomment [auth] and [auth.roles.default] below
+#   2. Run: mma-mcp add-client claude --role default
+#   3. Paste the generated [auth.clients.xxx] section into this file
 
 # [auth]
 # enabled = true
-#
-# [auth.roles.admin]
+
+# [auth.roles.default]
 # tools = "*"              # all tools
-# security = "none"        # no symbol filtering
+# security = ""            # inherit global security policy
+
+# Additional roles example (optional):
 #
-# [auth.roles.standard]
-# # Inherits [tools].enabled and [security] settings (nothing to configure)
-#
-# [auth.roles.analyst]
-# tools = ["evaluate"]  # text only, no image output
+# [auth.roles.restricted]
+# tools = ["evaluate"]     # text only, no image output
 # security = "whitelist"
 # allow_groups = ["math_core", "algebra", "calculus", "statistics"]
-# # Per-role resource limits (0 or omitted = inherit global [kernel] values)
 # timeout = 15
 # hard_timeout = 30
 # max_result_size = 16384
+
+# Clients are added by: mma-mcp add-client <name> --role <role>
+# Example output (paste below):
 #
 # [auth.clients.claude]
-# role = "admin"
-# password_hash = "scrypt:<salt_hex>:<hash_hex>"
-#
-# [auth.clients.chatgpt]
-# role = "analyst"
+# role = "default"
 # password_hash = "scrypt:<salt_hex>:<hash_hex>"
 """
 
