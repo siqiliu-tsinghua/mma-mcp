@@ -119,8 +119,8 @@ uv run mma-mcp init  # 生成带注释的 mma_mcp.toml
 29 个能力分组（22 个安全 + 7 个危险）覆盖约 6000 个 Wolfram Language 符号。从本地内核重新生成：
 
 ```bash
-uv run mma-mcp setup          # 分组已存在则跳过
-uv run mma-mcp setup --force   # 强制重新生成
+uv run mma-mcp setup          # 克隆后必须执行（从本地内核生成）
+uv run mma-mcp setup --force   # 强制重新生成（如 Wolfram 版本升级后）
 ```
 
 ## 客户端身份与角色

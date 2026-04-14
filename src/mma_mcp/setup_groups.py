@@ -399,6 +399,19 @@ DANGEROUS_SEEDS: dict[str, list[str]] = {
         # Live data functions that fetch from the internet
         "FinancialData", "WeatherData",
     ],
+    "system_mutation": [
+        "SetOptions", "SetSystemOptions",
+        "Unprotect", "Protect", "ClearAttributes",
+        "SetAttributes", "ClearAll", "Clear", "Remove",
+        "DownValues", "UpValues", "OwnValues", "SubValues",
+        "FormatValues", "DefaultValues", "NValues",
+        "Set", "SetDelayed", "TagSet", "TagSetDelayed",
+        "UpSet", "UpSetDelayed",
+        "$Pre", "$Post", "$PreRead", "$PrePrint",
+        "$SyntaxHandler", "$NewMessage", "$MessagePrePrint",
+        "Internal`InheritedBlock",
+        "Begin", "End", "BeginPackage", "EndPackage",
+    ],
 }
 
 
@@ -438,6 +451,7 @@ MANIFEST: dict[str, dict] = {
         "system_exec":        {"description": "Execute OS commands, load libraries, manage processes", "dangerous": True},
         "dynamic_eval":       {"description": "Dynamically construct and evaluate arbitrary code", "dangerous": True},
         "external_services":  {"description": "Connect to Wolfram Cloud and third-party services", "dangerous": True},
+        "system_mutation":    {"description": "Modify global state, definitions, and system options", "dangerous": True},
     }
 }
 
@@ -623,6 +637,7 @@ def run_setup(kernel_path: str | None = None) -> None:
     else:
         print("Warning: could not auto-detect kernel, letting wolframclient try...")
 
+    GROUPS_DIR.mkdir(parents=True, exist_ok=True)
     print("Starting Wolfram kernel...")
     with WolframLanguageSession(kernel=resolved) as session:
         print("Kernel ready.\n")

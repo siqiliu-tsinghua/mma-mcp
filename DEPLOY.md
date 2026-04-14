@@ -6,7 +6,7 @@
 
 ## Prerequisites
 
-- Debian / Ubuntu server with Wolfram Engine / Mathematica 14.3 installed and licensed
+- Debian / Ubuntu server with Wolfram Engine / Mathematica installed and licensed
 - A domain name pointing to your server's public IP
 - Port 443 available (and port 80 if using HTTP-01 challenge)
 
@@ -15,20 +15,20 @@
 ## 1. Environment Setup
 
 ```bash
-# 1. Clone the project
-git clone https://github.com/<owner>/mma-mcp.git /opt/mma-mcp
+# 1. Clone the project and move to /opt
+git clone https://github.com/<owner>/mma-mcp.git
+sudo mv mma-mcp /opt/mma-mcp
 cd /opt/mma-mcp
 
 # 2. Install uv (if not already installed)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 source ~/.bashrc
 
-# 3. Install dependencies
+# 3. Install dependencies (venv paths will use /opt/mma-mcp)
 uv sync
 
 # 4. Verify kernel path
 which WolframKernel
-# or: ls /usr/local/Wolfram/Mathematica/14.3/Executables/WolframKernel
 
 # 5. Generate security groups (~1 min, queries local kernel for symbol classification)
 uv run mma-mcp setup
@@ -54,8 +54,6 @@ dig mma.yourdomain.com +short
 ## 3. Configure mma-mcp
 
 ```bash
-cd /opt/mma-mcp
-
 # Generate default config
 uv run mma-mcp init
 ```
@@ -66,7 +64,7 @@ Edit `mma_mcp.toml` with the following key settings:
 [kernel]
 # Leave empty if `which WolframKernel` works
 # Otherwise specify the full path:
-# mathkernel = "/usr/local/Wolfram/Mathematica/14.3/Executables/WolframKernel"
+# mathkernel = "/path/to/WolframKernel"
 
 [server]
 transport = "http"
@@ -168,7 +166,20 @@ Web clients will still go through the OAuth flow, but the login page shows only 
 
 ---
 
-## 4. Install Caddy
+## 4. Create Service User
+
+Create a dedicated runtime user (like Apache's `www-data`). The `mma` user only runs the service — it needs no shell, no home directory, and no tools.
+
+```bash
+sudo useradd -r -s /usr/sbin/nologin mma
+sudo chown -R mma:mma /opt/mma-mcp
+```
+
+> **Note:** Binding to low ports (<1024, e.g., 443) requires the Linux `CAP_NET_BIND_SERVICE` capability, not traditional group permissions. This is granted via `AmbientCapabilities` in the Caddy systemd service below.
+
+---
+
+## 5. Install Caddy
 
 **HTTP-01 (stock Caddy):**
 
@@ -185,11 +196,12 @@ sudo apt-get update && sudo apt-get install -y caddy
 # Install Go (if not already installed)
 sudo apt-get install -y golang
 
-# Install xcaddy
-go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
+# Install xcaddy to system path (kept for future rebuilds)
+export GOPATH=/usr/local/share/go
+sudo GOPATH=$GOPATH go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
 
 # Build Caddy with your DNS provider plugin (example: alidns)
-~/go/bin/xcaddy build --with github.com/caddy-dns/alidns
+sudo $GOPATH/bin/xcaddy build --with github.com/caddy-dns/alidns
 # For other providers:
 #   --with github.com/caddy-dns/cloudflare
 #   --with github.com/caddy-dns/dnspod
@@ -203,18 +215,18 @@ caddy version
 
 ---
 
-## 5. Prepare Credentials
+## 6. Prepare Credentials
 
 The environment file contains secrets that systemd services read at startup.
 
 **If using DNS-01**, include your DNS provider's API credentials (example: alidns):
 
 ```bash
-sudo tee /etc/mma-mcp.env > /dev/null << EOF
+sudo tee /etc/default/mma-mcp > /dev/null << EOF
 ALIDNS_ACCESS_KEY_ID=<your-access-key-id>
 ALIDNS_ACCESS_KEY_SECRET=<your-access-key-secret>
 EOF
-sudo chmod 600 /etc/mma-mcp.env
+sudo chmod 600 /etc/default/mma-mcp
 ```
 
 For other providers, use their respective environment variables (see the table in section 3).
@@ -222,8 +234,8 @@ For other providers, use their respective environment variables (see the table i
 **If using HTTP-01**, the env file may be empty or contain only auth credentials:
 
 ```bash
-sudo touch /etc/mma-mcp.env
-sudo chmod 600 /etc/mma-mcp.env
+sudo touch /etc/default/mma-mcp
+sudo chmod 600 /etc/default/mma-mcp
 ```
 
 **If using static single token auth** (Mode B), also add the auth token:
@@ -234,26 +246,9 @@ echo "Save this token for Claude Web configuration:"
 echo "$MMA_MCP_AUTH_TOKEN"
 
 # Append to env file (or create it):
-echo "MMA_MCP_AUTH_TOKEN=$MMA_MCP_AUTH_TOKEN" | sudo tee -a /etc/mma-mcp.env > /dev/null
-sudo chmod 600 /etc/mma-mcp.env
+echo "MMA_MCP_AUTH_TOKEN=$MMA_MCP_AUTH_TOKEN" | sudo tee -a /etc/default/mma-mcp > /dev/null
+sudo chmod 600 /etc/default/mma-mcp
 ```
-
----
-
-## 6. Create a Dedicated Service User
-
-```bash
-# Create a system user with no login shell
-sudo useradd -r -s /usr/sbin/nologin -m -d /opt/mma-mcp mma
-
-# Transfer project directory ownership
-sudo chown -R mma:mma /opt/mma-mcp
-
-# Ensure the mma user can read the Mathematica license
-ls -la /usr/local/Wolfram/Mathematica/14.3/Configuration/Licensing/
-```
-
-> **Note:** Binding to low ports (<1024, e.g., 443) requires the Linux `CAP_NET_BIND_SERVICE` capability, not traditional group permissions. This is granted via `AmbientCapabilities` in the Caddy systemd service below.
 
 ---
 
@@ -264,14 +259,14 @@ ls -la /usr/local/Wolfram/Mathematica/14.3/Configuration/Licensing/
 ```bash
 sudo tee /etc/systemd/system/mma-mcp.service > /dev/null << 'EOF'
 [Unit]
-Description=mma-mcp Wolfram Engine MCP Server
+Description=MMA-MCP Server
 After=network.target
 
 [Service]
 User=mma
 Group=mma
 WorkingDirectory=/opt/mma-mcp
-EnvironmentFile=/etc/mma-mcp.env
+EnvironmentFile=/etc/default/mma-mcp
 ExecStart=/opt/mma-mcp/.venv/bin/mma-mcp serve --transport http --host 127.0.0.1 --port 8000
 Restart=on-failure
 RestartSec=5
@@ -293,7 +288,7 @@ After=network.target mma-mcp.service
 User=mma
 Group=mma
 WorkingDirectory=/opt/mma-mcp
-EnvironmentFile=/etc/mma-mcp.env
+EnvironmentFile=/etc/default/mma-mcp
 ExecStart=/usr/local/bin/caddy run --config /opt/mma-mcp/Caddyfile
 Restart=on-failure
 RestartSec=5
@@ -336,7 +331,7 @@ curl -v https://mma.yourdomain.com/mcp
 # Should return 401 Unauthorized
 
 # Mode B users can test directly with token:
-# source /etc/mma-mcp.env
+# source /etc/default/mma-mcp
 # curl -v -H "Authorization: Bearer $MMA_MCP_AUTH_TOKEN" https://mma.yourdomain.com/mcp
 # Should return 405 Method Not Allowed (MCP doesn't accept GET — service is working)
 
@@ -462,13 +457,13 @@ sudo journalctl -u mma-mcp -e
 # Caddy certificate issuance fails
 # - Check DNS API credentials
 # - Verify A record: dig mma.yourdomain.com
-# - Check environment variables: sudo cat /etc/mma-mcp.env
+# - Check environment variables: sudo cat /etc/default/mma-mcp
 
 # Kernel not found
-uv run python -c "from mma_mcp.kernel import find_kernel; print(find_kernel())"
+sudo -u mma /opt/mma-mcp/.venv/bin/python -c "from mma_mcp.kernel import find_kernel; print(find_kernel())"
 
 # Manual HTTP test
-uv run mma-mcp serve --transport http --host 127.0.0.1 --port 8000
+sudo -u mma /opt/mma-mcp/.venv/bin/mma-mcp serve --transport http --host 127.0.0.1 --port 8000
 # In another terminal:
 curl http://127.0.0.1:8000/mcp
 ```

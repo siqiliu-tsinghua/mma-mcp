@@ -6,7 +6,7 @@
 
 ## 前置条件
 
-- Debian / Ubuntu 服务器，已持有并安装 Wolfram Engine / Mathematica 14.3
+- Debian / Ubuntu 服务器，已持有并安装 Wolfram Engine / Mathematica
 - 一个指向该服务器公网 IP 的域名
 - 443 端口可用（使用 HTTP-01 验证时还需要 80 端口）
 
@@ -15,20 +15,20 @@
 ## 一、环境准备
 
 ```bash
-# 1. 克隆项目
-git clone https://github.com/<owner>/mma-mcp.git /opt/mma-mcp
+# 1. 克隆项目并移至 /opt
+git clone https://github.com/<owner>/mma-mcp.git
+sudo mv mma-mcp /opt/mma-mcp
 cd /opt/mma-mcp
 
 # 2. 安装 uv（如未安装）
 curl -LsSf https://astral.sh/uv/install.sh | sh
 source ~/.bashrc   # 或重新登录
 
-# 3. 安装依赖
+# 3. 安装依赖（venv 路径将使用 /opt/mma-mcp）
 uv sync
 
 # 4. 确认内核路径
 which WolframKernel
-# 或者 ls /usr/local/Wolfram/Mathematica/14.3/Executables/WolframKernel
 
 # 5. 生成安全分组（约 1 分钟，首次运行需要启动内核查询符号分类）
 uv run mma-mcp setup
@@ -56,8 +56,6 @@ dig mma.yourdomain.com +short
 ## 三、配置 mma-mcp
 
 ```bash
-cd /opt/mma-mcp
-
 # 生成默认配置
 uv run mma-mcp init
 ```
@@ -68,7 +66,7 @@ uv run mma-mcp init
 [kernel]
 # 如果 which WolframKernel 能找到，留空即可
 # 否则填写完整路径：
-# mathkernel = "/usr/local/Wolfram/Mathematica/14.3/Executables/WolframKernel"
+# mathkernel = "/path/to/WolframKernel"
 
 [server]
 transport = "http"
@@ -171,7 +169,20 @@ Web 客户端连接时同样会走 OAuth 流程，但登录页面只显示密码
 
 ---
 
-## 四、安装 Caddy
+## 四、创建服务用户
+
+创建专用运行时用户（类似 Apache 的 `www-data`）。`mma` 用户仅用于运行服务——无需 shell、home 目录或任何工具。
+
+```bash
+sudo useradd -r -s /usr/sbin/nologin mma
+sudo chown -R mma:mma /opt/mma-mcp
+```
+
+> **说明：** 绑定低端口（<1024，如 443）是 Linux capability（`CAP_NET_BIND_SERVICE`），不是传统的组权限。下面在 Caddy 的 systemd 服务中通过 `AmbientCapabilities` 授予。
+
+---
+
+## 五、安装 Caddy
 
 **HTTP-01（官方 Caddy）：**
 
@@ -188,11 +199,12 @@ sudo apt-get update && sudo apt-get install -y caddy
 # 安装 Go（如未安装）
 sudo apt-get install -y golang
 
-# 安装 xcaddy
-go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
+# 安装 xcaddy 到系统路径（保留以便将来重新构建）
+export GOPATH=/usr/local/share/go
+sudo GOPATH=$GOPATH go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
 
 # 构建带 DNS 插件的 Caddy（以阿里云为例）
-~/go/bin/xcaddy build --with github.com/caddy-dns/alidns
+sudo $GOPATH/bin/xcaddy build --with github.com/caddy-dns/alidns
 # 其他服务商:
 #   --with github.com/caddy-dns/cloudflare
 #   --with github.com/caddy-dns/dnspod
@@ -206,18 +218,18 @@ caddy version
 
 ---
 
-## 五、准备凭据
+## 六、准备凭据
 
 环境变量文件包含 systemd 服务启动时读取的密钥。
 
 **使用 DNS-01 时**，需要填入 DNS 服务商的 API 凭据（以阿里云为例）：
 
 ```bash
-sudo tee /etc/mma-mcp.env > /dev/null << EOF
+sudo tee /etc/default/mma-mcp > /dev/null << EOF
 ALIDNS_ACCESS_KEY_ID=<你的AccessKeyID>
 ALIDNS_ACCESS_KEY_SECRET=<你的AccessKeySecret>
 EOF
-sudo chmod 600 /etc/mma-mcp.env
+sudo chmod 600 /etc/default/mma-mcp
 ```
 
 其他服务商请填入对应的环境变量（见第三节的表格）。
@@ -225,8 +237,8 @@ sudo chmod 600 /etc/mma-mcp.env
 **使用 HTTP-01 时**，环境变量文件可以为空或仅包含认证凭据：
 
 ```bash
-sudo touch /etc/mma-mcp.env
-sudo chmod 600 /etc/mma-mcp.env
+sudo touch /etc/default/mma-mcp
+sudo chmod 600 /etc/default/mma-mcp
 ```
 
 **使用静态单 token 认证（模式 B）时**，还需要添加 auth token：
@@ -237,29 +249,9 @@ echo "记住这个 token，Claude Web 配置时需要用:"
 echo "$MMA_MCP_AUTH_TOKEN"
 
 # 追加到环境变量文件：
-echo "MMA_MCP_AUTH_TOKEN=$MMA_MCP_AUTH_TOKEN" | sudo tee -a /etc/mma-mcp.env > /dev/null
-sudo chmod 600 /etc/mma-mcp.env
+echo "MMA_MCP_AUTH_TOKEN=$MMA_MCP_AUTH_TOKEN" | sudo tee -a /etc/default/mma-mcp > /dev/null
+sudo chmod 600 /etc/default/mma-mcp
 ```
-
----
-
-## 六、创建专用服务用户
-
-```bash
-# 创建无登录 shell 的系统用户
-sudo useradd -r -s /usr/sbin/nologin -m -d /opt/mma-mcp mma
-
-# 将项目目录所有权交给该用户
-sudo chown -R mma:mma /opt/mma-mcp
-
-# 让 mma 用户可以读取 Mathematica license
-# （根据实际安装路径调整，通常 /usr/local/Wolfram 已经是 world-readable）
-ls -la /usr/local/Wolfram/Mathematica/14.3/Configuration/Licensing/
-```
-
-> **说明：** 绑定低端口（<1024，如 443）是 Linux capability（`CAP_NET_BIND_SERVICE`），
-> 不是传统的组权限，无法通过加组解决。下面在 Caddy 的 systemd 服务中通过
-> `AmbientCapabilities` 授予，仅对该服务进程生效，不影响全局。
 
 ---
 
@@ -270,14 +262,14 @@ ls -la /usr/local/Wolfram/Mathematica/14.3/Configuration/Licensing/
 ```bash
 sudo tee /etc/systemd/system/mma-mcp.service > /dev/null << 'EOF'
 [Unit]
-Description=mma-mcp Wolfram Engine MCP Server
+Description=MMA-MCP Server
 After=network.target
 
 [Service]
 User=mma
 Group=mma
 WorkingDirectory=/opt/mma-mcp
-EnvironmentFile=/etc/mma-mcp.env
+EnvironmentFile=/etc/default/mma-mcp
 ExecStart=/opt/mma-mcp/.venv/bin/mma-mcp serve --transport http --host 127.0.0.1 --port 8000
 Restart=on-failure
 RestartSec=5
@@ -299,7 +291,7 @@ After=network.target mma-mcp.service
 User=mma
 Group=mma
 WorkingDirectory=/opt/mma-mcp
-EnvironmentFile=/etc/mma-mcp.env
+EnvironmentFile=/etc/default/mma-mcp
 ExecStart=/usr/local/bin/caddy run --config /opt/mma-mcp/Caddyfile
 Restart=on-failure
 RestartSec=5
@@ -342,7 +334,7 @@ curl -v https://mma.yourdomain.com/mcp
 # 应返回 401 Unauthorized，说明认证中间件正常工作
 
 # 模式 B 用户可直接带 token 测试：
-# source /etc/mma-mcp.env
+# source /etc/default/mma-mcp
 # curl -v -H "Authorization: Bearer $MMA_MCP_AUTH_TOKEN" https://mma.yourdomain.com/mcp
 # 应返回 405 Method Not Allowed（MCP 端点不接受 GET，说明服务正常）
 
@@ -471,13 +463,13 @@ sudo journalctl -u mma-mcp -e
 # Caddy 证书签发失败
 # - 检查 DNS API 凭据是否正确
 # - 检查 A 记录是否已生效: dig mma.yourdomain.com
-# - 检查环境变量: sudo cat /etc/mma-mcp.env
+# - 检查环境变量: sudo cat /etc/default/mma-mcp
 
 # 内核找不到
-uv run python -c "from mma_mcp.kernel import find_kernel; print(find_kernel())"
+sudo -u mma /opt/mma-mcp/.venv/bin/python -c "from mma_mcp.kernel import find_kernel; print(find_kernel())"
 
 # 手动测试 HTTP 端
-uv run mma-mcp serve --transport http --host 127.0.0.1 --port 8000
+sudo -u mma /opt/mma-mcp/.venv/bin/mma-mcp serve --transport http --host 127.0.0.1 --port 8000
 # 另一个终端:
 curl http://127.0.0.1:8000/mcp
 ```

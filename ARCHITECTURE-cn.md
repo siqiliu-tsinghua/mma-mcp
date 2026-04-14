@@ -105,7 +105,7 @@ mma-mcp 是一个 [Model Context Protocol (MCP)](https://modelcontextprotocol.io
 |------|------|------|
 | **Filter** | `security/filter.py` | `ExpressionFilter`：正则提取 WL 符号 → 黑/白名单校验；处理 `Symbol["X"]` 和 `<<` 语法糖 |
 | **Registry** | `security/registry.py` | `CapabilityRegistry`：加载分组 JSON → 构建 `ExpressionFilter`；支持多次 `build_filter` 生成不同策略 |
-| **Groups** | `security/groups/*.json` | 29 个预生成的符号分组（22 安全 + 7 危险），由 `mma-mcp setup` 基于 WolframLanguageData 生成 |
+| **Groups** | `security/groups/*.json` | 29 个符号分组（22 安全 + 7 危险），由用户在本地通过 `mma-mcp setup` 从自己的 Wolfram 内核生成（不随仓库分发） |
 
 ### 认证模块
 

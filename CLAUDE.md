@@ -38,7 +38,7 @@ mma-mcp/
 │       │   ├── __init__.py
 │       │   ├── filter.py          # ExpressionFilter: regex symbol extraction + policy check
 │       │   ├── registry.py        # CapabilityRegistry: load groups, build filters
-│       │   └── groups/            # Pre-generated JSON symbol lists per group
+│       │   └── groups/            # User-generated JSON symbol lists per group (not committed)
 │       │       ├── manifest.json  # Group metadata (29 groups: 22 safe + 7 dangerous)
 │       │       ├── math_core.json, algebra.json, ...  # 22 safe groups
 │       │       ├── system_exec.json, file_read.json, ...  # 7 dangerous groups
@@ -170,4 +170,4 @@ See `DEPLOY.md` and `ARCHITECTURE.md` for details.
 - Prefer `wolframclient` native Python types over raw string parsing where possible.
 - Tests go in `tests/`, use `pytest`. Integration tests marked with `@pytest.mark.integration`.
 - No external Wolfram Cloud calls — local Engine only.
-- Group JSON files are pre-generated and committed; use `mma-mcp setup` to refresh after a Wolfram Engine upgrade.
+- Group JSON files are generated locally by `mma-mcp setup` from the user's own Wolfram kernel and are not committed to git (gitignored). Users must run `mma-mcp setup` after cloning.

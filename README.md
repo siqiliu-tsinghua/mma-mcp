@@ -123,8 +123,8 @@ Expressions are filtered **before** reaching the Wolfram kernel. Symbols are ext
 29 capability groups (22 safe + 7 dangerous) cover ~6000 Wolfram Language symbols. Regenerate from your local kernel:
 
 ```bash
-uv run mma-mcp setup          # skip if groups already exist
-uv run mma-mcp setup --force   # force regeneration
+uv run mma-mcp setup          # required after cloning (generates from your local kernel)
+uv run mma-mcp setup --force   # force regeneration (e.g., after Wolfram Engine upgrade)
 ```
 
 ## Client Identity & Roles

@@ -9,3 +9,6 @@ build/
 .codex
 *.db
 ASSESSMENT_REPORT.md
+
+# Generated from local Wolfram kernel (contains WolframLanguageData derivatives)
+src/mma_mcp/security/groups/*.json
