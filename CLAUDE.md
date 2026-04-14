@@ -51,6 +51,7 @@ mma-mcp/
 │   ├── test_config.py             # Config loading/validation tests
 │   ├── test_auth.py               # Auth + OAuth + password tests
 │   ├── test_tools.py              # Tool registry + RBAC + session isolation tests
+│   ├── test_cli.py                # CLI subcommand unit tests
 │   ├── test_integration.py        # Real kernel integration tests
 │   └── test_mcp_e2e.py            # Full MCP protocol end-to-end tests
 ├── scripts/
@@ -130,7 +131,7 @@ Each role can independently choose mode and groups, or inherit the global settin
 ### OAuth 2.1 (oauth.py)
 - RFC 8414 metadata discovery, RFC 7591 DCR, RFC 7636 PKCE (S256)
 - Authorization Code grant with login page
-- In-memory token store with TTL and capacity limits
+- SQLite-backed token and DCR client persistence; auth codes and rate-limit counters remain in-memory (short-lived)
 
 ### Password hashing (passwords.py)
 - stdlib `hashlib.scrypt` (N=16384, r=8, p=1), timing-safe verification
@@ -161,12 +162,7 @@ All Wolfram Language capabilities are accessed through these two universal tools
 - **stdio:** Local MCP clients (Claude Desktop, Claude Code, VS Code)
 - **HTTP:** `mma-mcp serve --transport http`, behind Caddy for TLS termination
 
-详见 `DEPLOY.md` 和 `ARCHITECTURE.md`。
-
-## WSL 开发注意事项
-
-- **严禁运行 `wolframscript -activate`**：免费版 Wolfram Engine 有单机激活数量限制。WSL 每次重启 MAC 地址会变，重复激活会触发"single machine process limit reached"，导致 license 锁死数小时。如遇 license 失效，联系机器管理员手动处理，不要自行激活。
-- WSL 重启后若内核报 "No valid password found"，属于已知 WSL 环境问题，等待 license 服务器释放或重新配置 WSL 网络。
+See `DEPLOY.md` and `ARCHITECTURE.md` for details.
 
 ## Conventions
 
