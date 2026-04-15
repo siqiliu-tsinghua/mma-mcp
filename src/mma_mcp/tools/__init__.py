@@ -14,8 +14,10 @@ Role-based access control:
 
 from __future__ import annotations
 
+import asyncio
 import contextvars
 import functools
+import inspect
 import logging
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -168,21 +170,62 @@ def _safe_wrapper(fn: Callable, ctx: ToolContext, tool_name: str) -> Callable:
     2. Checks if the tool is allowed for that role.
     3. Sets ``_active_filter`` contextvar to the role's security filter.
     4. Catches SecurityError / WolframKernelException → readable error messages.
+
+    Supports both sync and async tool functions.  When the underlying
+    function is async, the wrapper itself is async and ``await``s the call.
+    FastMCP's ``Context`` parameter (named ``mcp_ctx``) is automatically
+    injected from the keyword arguments if the underlying function accepts it.
     """
-    import inspect
     from mma_mcp.kernel import KernelTimeout
     from mma_mcp.security.filter import SecurityError
     from wolframclient.exception import WolframKernelException
 
-    @functools.wraps(fn)
-    def wrapper(**kwargs: Any) -> Any:
-        # Assign a request ID for log correlation
+    is_async = asyncio.iscoroutinefunction(fn)
+
+    # Detect whether fn accepts an mcp_ctx parameter
+    _fn_sig = inspect.signature(fn)
+    _accepts_mcp_ctx = "mcp_ctx" in _fn_sig.parameters
+
+    async def _async_body(**kwargs: Any) -> Any:
         from mma_mcp.logging_config import new_request_id, request_id
         rid = new_request_id()
         rid_token = request_id.set(rid)
         logger.info("Tool %s called (params: %s)", tool_name, list(kwargs.keys()))
         try:
-            # Role-based access control
+            filt_token = _apply_role_policy(ctx, tool_name)
+            try:
+                # Inject FastMCP Context if the function accepts it
+                if _accepts_mcp_ctx:
+                    kwargs["mcp_ctx"] = kwargs.pop("ctx", None)
+                result = await fn(ctx, **kwargs)
+                logger.info("Tool %s completed", tool_name)
+                return result
+            finally:
+                if filt_token is not None:
+                    _active_filter.reset(filt_token)
+        except SecurityError as e:
+            logger.warning("Security: %s", e)
+            return f"[Security Error] {e}"
+        except KernelTimeout as e:
+            logger.error("Kernel timeout: %s", e)
+            return f"[Timeout] {e}"
+        except WolframKernelException as e:
+            logger.error("Kernel error: %s", e)
+            return f"[Kernel Error] {e}"
+        except _AccessDenied as e:
+            return str(e)
+        except Exception as e:
+            logger.exception("Unexpected error in tool %s", fn.__name__)
+            return f"[Error] {type(e).__name__}: {e}"
+        finally:
+            request_id.reset(rid_token)
+
+    def _sync_body(**kwargs: Any) -> Any:
+        from mma_mcp.logging_config import new_request_id, request_id
+        rid = new_request_id()
+        rid_token = request_id.set(rid)
+        logger.info("Tool %s called (params: %s)", tool_name, list(kwargs.keys()))
+        try:
             filt_token = _apply_role_policy(ctx, tool_name)
             try:
                 result = fn(ctx, **kwargs)
@@ -208,17 +251,38 @@ def _safe_wrapper(fn: Callable, ctx: ToolContext, tool_name: str) -> Callable:
         finally:
             request_id.reset(rid_token)
 
-    # Strip the 'ctx' parameter from the signature so FastMCP doesn't see it.
+    wrapper = _async_body if is_async else _sync_body
+    functools.update_wrapper(wrapper, fn)
+
+    # Strip 'ctx' and 'mcp_ctx' from the signature so FastMCP doesn't see
+    # our internal parameters.  For async tools that accept mcp_ctx, we
+    # re-expose it as 'ctx' with type Context so FastMCP injects it.
     # Also remove the return annotation — FastMCP handles Image returns
     # specially via its own decorator path, but our dynamic registration
     # confuses pydantic if it sees the Image type in annotations.
     sig = inspect.signature(fn)
-    params = [p for name, p in sig.parameters.items() if name != "ctx"]
-    wrapper.__signature__ = sig.replace(parameters=params, return_annotation=inspect.Parameter.empty)
+    params = []
+    for pname, p in sig.parameters.items():
+        if pname == "ctx":
+            continue
+        if pname == "mcp_ctx":
+            # Re-expose as 'ctx' with Context type for FastMCP injection
+            from mcp.server.fastmcp import Context
+            params.append(
+                p.replace(name="ctx", annotation=Context)
+            )
+            continue
+        params.append(p)
+    wrapper.__signature__ = sig.replace(
+        parameters=params, return_annotation=inspect.Parameter.empty,
+    )
     wrapper.__annotations__ = {
         k: v for k, v in fn.__annotations__.items()
-        if k != "ctx" and k != "return"
+        if k not in ("ctx", "mcp_ctx", "return")
     }
+    if _accepts_mcp_ctx:
+        from mcp.server.fastmcp import Context
+        wrapper.__annotations__["ctx"] = Context
 
     return wrapper
 

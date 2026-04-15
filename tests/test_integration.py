@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from mma_mcp.config import AppConfig, KernelConfig, SecurityConfig
-from mma_mcp.kernel import KernelSession, _wrap_context
+from mma_mcp.kernel import KernelSession, _eval_in_context
 from mma_mcp.security.filter import ExpressionFilter, SecurityError
 from mma_mcp.security.registry import CapabilityRegistry
 
