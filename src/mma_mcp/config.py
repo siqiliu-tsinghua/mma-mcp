@@ -556,10 +556,8 @@ deny_groups = [
 # evaluate_image: returns PNG images (experimental — see note below)
 enabled = [
     "evaluate",
-    "evaluate_image",
+    # "evaluate_image",  # experimental — image display depends on client support
 ]
-# Note: evaluate_image is experimental. Image display depends on the client's
-# handling of MCP ImageContent. To disable, remove "evaluate_image" above.
 
 # ─── Authentication & Roles ─────────────────────────────────────────────────
 # Client identity and role-based access control for HTTP transport.
@@ -572,13 +570,16 @@ enabled = [
 # enabled = true
 
 # [auth.roles.default]
-# tools = "*"              # all tools (or ["evaluate"] to disable image output)
+# tools = ["evaluate"]     # evaluate_image is experimental (see [tools] note)
 # security = ""            # inherit global security policy
+
+# To enable experimental image output for a role:
+# tools = ["evaluate", "evaluate_image"]
 
 # Additional roles example (optional):
 #
 # [auth.roles.restricted]
-# tools = ["evaluate"]     # text only, no image output
+# tools = ["evaluate"]
 # security = "whitelist"
 # allow_groups = ["math_core", "algebra", "calculus", "statistics"]
 # timeout = 15

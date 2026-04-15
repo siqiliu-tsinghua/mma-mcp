@@ -1,162 +1,33 @@
-# TODO: Async Evaluation with Progress Heartbeat
+# TODO: URL-based Image Delivery
 
 ## Problem
 
-When a Wolfram kernel evaluation takes longer than the client's timeout
-(Claude.ai ~30s, ChatGPT unknown), the client disconnects. This triggers
-an unhandled `ClientDisconnect` in the MCP SDK, crashing the server process.
-systemd restarts it, but the client takes additional time to reconnect.
-For users who regularly run non-trivial computations (DSolve, NIntegrate,
-large symbolic manipulations), this makes the service unreliable.
+MCP `ImageContent` 在主流 Web 客户端上体验不佳：
+- Claude.ai 把图片折叠在 result 面板里，需要点击展开
+- ChatGPT 完全不渲染 MCP 返回的图片
 
-## Goal
+## Idea
 
-Send periodic progress notifications during kernel evaluation so that
-the client knows the server is alive and doesn't disconnect prematurely.
+将生成的图片存储在服务器上（如 `https://mma.<domain>/img/<random>.png`），
+工具返回 Markdown 图片语法 `![plot](url)` 作为文本结果。如果客户端将
+tool result 当 Markdown 渲染，图片就会内联显示。
 
-## Current Architecture
+## 验证步骤（零成本）
 
-```
-Client  -->  FastMCP (_safe_wrapper)  -->  evaluate(ctx, expr)
-                                              |
-                                              v
-                                         ctx.pool.worker()  -->  kernel.evaluate_to_string()
-                                                                      |
-                                                                      v
-                                                                 session.evaluate()  [blocking, in ThreadPoolExecutor]
-```
+在 Claude.ai / ChatGPT 中让 `evaluate` 返回一个包含公开图片 URL 的
+Markdown 图片标记，观察客户端是否渲染。
 
-- Tool functions are **synchronous** (`def evaluate(ctx, ...)`)
-- `_safe_wrapper` in `tools/__init__.py` wraps them for RBAC + error handling
-- Kernel evaluation blocks in `ThreadPoolExecutor` with `hard_timeout`
-- FastMCP supports **async** tool functions with `Context.report_progress()`
+## 实现方案（验证通过后）
 
-## SDK Support
+1. Caddy 添加 `/img/` 静态文件路由，指向图片存储目录
+2. `evaluate_image` 将 PNG 存入该目录（随机文件名，如 UUID）
+3. 返回 `![result](https://mma.<domain>/img/<uuid>.png)` 文本
+4. 定期清理过期图片（cron 或进程内定时器）
 
-FastMCP provides `Context` (type hint injection):
+## 待考虑
 
-```python
-from mcp.server.fastmcp import Context
-
-@server.tool()
-async def my_tool(x: int, ctx: Context) -> str:
-    await ctx.report_progress(0, 100, "Starting...")
-    # ... do work ...
-    await ctx.report_progress(100, 100, "Done")
-    return result
-```
-
-`report_progress()` sends MCP `notifications/progress` over the SSE stream,
-which should reset the client's idle timeout. The client must provide a
-`progressToken` in the request `_meta` for this to work.
-
-## Implementation Plan
-
-### Phase 1: Async tool functions with heartbeat ✔ (implemented)
-
-**Files:** `tools/evaluate.py`, `tools/__init__.py`, `kernel.py`
-
-1. **Make tool functions async.** Change `def evaluate(ctx, ...)` to
-   `async def evaluate(ctx, ...)`. FastMCP supports both sync and async tools.
-
-2. **Accept FastMCP Context in tool functions.** Add a `Context` parameter
-   to receive the MCP request context. Our `_safe_wrapper` must be updated
-   to pass it through (currently it strips `ctx` from the signature; now it
-   needs to also handle `Context`).
-
-3. **Run kernel evaluation in a background thread with heartbeat loop.**
-   Instead of blocking on `kernel.evaluate_to_string()`, submit the
-   evaluation to a thread and poll with heartbeat.
-
-   **Critical:** `pool.worker()` must be acquired inside the thread
-   function, not in the async layer. Otherwise, if the client disconnects
-   and the async task is cancelled, `CancelledError` triggers the context
-   manager's `__exit__` and releases the worker — while the kernel thread
-   is still running. This leads to concurrent reuse of the same kernel.
-
-   ```python
-   async def _run_with_heartbeat(func, mcp_ctx, hard_timeout):
-       loop = asyncio.get_running_loop()
-       future = loop.run_in_executor(None, func)
-       elapsed = 0
-       while not future.done():
-           try:
-               return await asyncio.wait_for(
-                   asyncio.shield(future), timeout=5,
-               )
-           except asyncio.TimeoutError:
-               elapsed += 5
-               if mcp_ctx:
-                   await mcp_ctx.report_progress(
-                       elapsed, hard_timeout or None,
-                       f"Computing… ({elapsed}s)",
-                   )
-       return future.result()
-
-   async def evaluate(ctx, expression, form="", mcp_ctx=None):
-       ctx.check(expression)
-       fmt = form or ctx.default_format
-
-       def _do_eval():
-           # Worker lifecycle is bound to the thread — safe from
-           # async cancellation.
-           with ctx.pool.worker() as (kernel, wl_context):
-               return kernel.evaluate_to_string(
-                   expression, fmt,
-                   timeout=ctx.timeout, hard_timeout=ctx.hard_timeout,
-                   context=wl_context,
-               )
-
-       result = await _run_with_heartbeat(_do_eval, mcp_ctx, ctx.hard_timeout)
-       return ctx.truncate(result)
-   ```
-
-4. **Update `_safe_wrapper`** to handle async functions (use `await` if
-   the wrapped function is a coroutine) and pass through the `Context`
-   parameter from FastMCP. The wrapper renames `mcp_ctx` → `ctx` in the
-   exposed signature so FastMCP auto-injects its `Context` object.
-
-### Phase 2: Verify client behavior
-
-- Test whether Claude.ai sends `progressToken` in `_meta` and whether
-  receiving `notifications/progress` actually prevents disconnection.
-- Test ChatGPT's behavior with progress notifications.
-- If clients don't send `progressToken`, `report_progress()` is a no-op
-  (see SDK source: returns early if token is None). In that case, the
-  heartbeat has no effect and we need to investigate SSE-level keep-alive
-  or other approaches.
-
-### Phase 3: Graceful client disconnection handling
-
-Even with heartbeat, clients may still disconnect (network issues, user
-navigating away). Currently this crashes the server via unhandled
-`ClientDisconnect` in the MCP SDK.
-
-**Partial mitigation (Phase 1):** Worker lifecycle is bound to the
-executor thread, not the async task. When a client disconnects and the
-task is cancelled, the kernel thread runs to completion and releases the
-worker normally — no orphaned kernel or concurrent reuse.
-
-- Monitor MCP SDK for fixes to `ClientDisconnect` handling in
-  `streamable_http.py`.
-- If unfixed, consider wrapping the server entrypoint to catch and log
-  `ClientDisconnect` instead of crashing. This may require patching or
-  subclassing the SDK's HTTP handler.
-
-## Risk Assessment
-
-- **Phase 1** is self-contained and backwards-compatible. Sync tools still
-  work; async is additive. The heartbeat is a no-op if the client doesn't
-  support `progressToken`.
-- **Phase 2** depends on client behavior we can't control. If clients
-  ignore progress notifications, we may need SSE-level keep-alive instead.
-- **Phase 3** depends on MCP SDK evolution.
-
-## Files to Modify
-
-| File | Change |
-|------|--------|
-| `tools/evaluate.py` | sync → async, add heartbeat loop |
-| `tools/__init__.py` | `_safe_wrapper` async support, Context passthrough |
-| `kernel.py` | No change needed (stays sync, called from executor) |
-| `pool.py` | No change needed (context manager is sync, usable in executor) |
+- **认证**：图片 URL 公开可访问（文件名不可猜测）vs 签名 URL（带过期时间）
+- **清理策略**：TTL 多长合适（5 分钟？1 小时？）
+- **回退**：如果客户端不渲染 Markdown 图片，仍需保留 `ImageContent` 路径
+- **MCP Resource**：另一条路，服务器暴露 `resource://` 链接供客户端拉取，
+  但目前主流客户端对 MCP Resource 的支持不明确

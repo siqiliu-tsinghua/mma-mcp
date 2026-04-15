@@ -307,10 +307,6 @@ ExecStart=/usr/local/bin/caddy run --config /opt/mma-mcp/Caddyfile
 Restart=on-failure
 RestartSec=5
 
-# Caddy data directories (mma user has no home directory)
-Environment=XDG_CONFIG_HOME=/opt/mma-mcp/.caddy/config
-Environment=XDG_DATA_HOME=/opt/mma-mcp/.caddy/data
-
 # Allow binding to port 443 without root
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE

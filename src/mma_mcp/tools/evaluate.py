@@ -6,8 +6,12 @@ import asyncio
 
 from mcp.server.fastmcp import Context, Image
 
+import logging
+
 from mma_mcp.security.filter import SecurityError
 from mma_mcp.tools import ToolContext, register
+
+logger = logging.getLogger(__name__)
 
 _ALLOWED_FORMS = frozenset({
     "TeXForm", "OutputForm", "InputForm", "StandardForm", "TraditionalForm",
@@ -38,10 +42,13 @@ async def _run_with_heartbeat(
         except asyncio.TimeoutError:
             elapsed += _HEARTBEAT_INTERVAL
             if mcp_ctx:
+                logger.info("Heartbeat: %ds elapsed", elapsed)
                 await mcp_ctx.report_progress(
                     elapsed, hard_timeout or None,
                     f"Computing… ({elapsed}s)",
                 )
+            else:
+                logger.debug("Heartbeat: %ds elapsed (no progressToken)", elapsed)
 
     return future.result()
 

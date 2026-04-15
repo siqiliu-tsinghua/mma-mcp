@@ -167,6 +167,14 @@ uv run mcp dev src/mma_mcp/server.py
 | `mma-mcp hash-password` | Hash a password for config |
 | `mma-mcp add-client` | Generate TOML snippet for a new AI client |
 
+## Client Compatibility
+
+| Client | Long computations | Notes |
+|--------|-------------------|-------|
+| Claude.ai | ✔ Supported | Sends `progressToken`; server heartbeat keeps connection alive |
+| ChatGPT | ✘ May timeout | Does not send `progressToken`; has a hard timeout (~60s) independent of server heartbeat |
+| Claude Desktop / Claude Code | Not tested | Local stdio transport |
+
 ## License
 
 MIT — applies only to the code in this repository.  Use of Wolfram Engine /

@@ -163,6 +163,14 @@ uv run mcp dev src/mma_mcp/server.py
 | `mma-mcp hash-password` | 哈希密码 |
 | `mma-mcp add-client` | 生成新 AI 客户端的 TOML 片段 |
 
+## 客户端兼容性
+
+| 客户端 | 长时间计算 | 说明 |
+|--------|-----------|------|
+| Claude.ai | ✔ 支持 | 发送 `progressToken`，服务器心跳保持连接 |
+| ChatGPT | ✘ 可能超时 | 不发送 `progressToken`，有独立于服务器心跳的硬超时（约 60 秒） |
+| Claude Desktop / Claude Code | 未测试 | 本地 stdio 传输 |
+
 ## 许可证
 
 MIT——仅适用于本仓库中的代码。Wolfram Engine / Mathematica 的使用受 Wolfram Research 自身许可条款约束。

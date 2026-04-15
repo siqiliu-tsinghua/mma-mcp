@@ -309,10 +309,6 @@ ExecStart=/usr/local/bin/caddy run --config /opt/mma-mcp/Caddyfile
 Restart=on-failure
 RestartSec=5
 
-# Caddy 数据目录（mma 用户没有 home 目录）
-Environment=XDG_CONFIG_HOME=/opt/mma-mcp/.caddy/config
-Environment=XDG_DATA_HOME=/opt/mma-mcp/.caddy/data
-
 # 允许绑定 443 端口（无需 root）
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
