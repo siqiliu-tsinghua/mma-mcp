@@ -276,9 +276,7 @@ class KernelSession:
             hard_timeout: Python-side hard timeout seconds. 0 = no limit.
             context:      WL context for session isolation (e.g. "MCP$alice`").
         """
-        inner = _wrap_context(expr_str, context)
-        if timeout > 0:
-            inner = f"TimeConstrained[{inner}, {timeout}]"
+        inner = _eval_in_context(expr_str, context, timeout)
         wrapped = wl.ToString(wlexpr(inner), wlexpr(form))
         result = self.evaluate(wrapped, hard_timeout=hard_timeout)
         if isinstance(result, str):
@@ -301,9 +299,7 @@ class KernelSession:
             context:      WL context for session isolation.
         """
         self._ensure_started()
-        inner = _wrap_context(expr_str, context)
-        if timeout > 0:
-            inner = f"TimeConstrained[{inner}, {timeout}]"
+        inner = _eval_in_context(expr_str, context, timeout)
 
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
             tmp_path = f.name
@@ -345,26 +341,45 @@ class KernelSession:
 # Session isolation helper
 # ---------------------------------------------------------------------------
 
-def _wrap_context(expr_str: str, context: str) -> str:
-    """Wrap an expression so it is parsed and evaluated in an isolated context.
+def _eval_in_context(expr_str: str, context: str, timeout: int = 0) -> str:
+    """Build a WL expression that evaluates in an isolated context.
 
-    Uses ``ToExpression`` inside a ``Block`` so that symbol resolution
-    happens *after* ``$Context`` / ``$ContextPath`` have been changed.
-    Without ``ToExpression``, ``wlexpr`` would parse ``x`` as ``Global`x``
-    before the ``Block`` takes effect.
+    Phase 1 — evaluate in the pool context so new symbols land in
+    ``Pool$<hex>``` instead of ``Global```:
+
+        Block[{$Context = "Pool$…`", $ContextPath = {"Pool$…`", "System`"}},
+          ToExpression["…"]]
+
+    Phase 2 — replace pool-context symbols with their ``Global``` equivalents
+    so the formatted output shows clean names (``x`` not ``Pool$abc`x``).
+    This runs *outside* the Block, where ``$Context`` has reverted to
+    ``Global```, so ``Symbol[SymbolName[s]]`` produces ``Global`name``.
 
     The ``ToExpression`` here is internal infrastructure — the user's
     expression has already passed security filtering before this point.
 
-    If *context* is empty, returns *expr_str* unchanged.
+    If *context* is empty, returns *expr_str* (with optional TimeConstrained).
     """
     if not context:
-        return expr_str
+        inner = expr_str
+        if timeout > 0:
+            inner = f"TimeConstrained[{inner}, {timeout}]"
+        return inner
+
     escaped = _escape_for_wl_string(expr_str)
-    return (
+    eval_part = (
         f'Block[{{$Context = "{context}", '
         f'$ContextPath = {{"{context}", "System`"}}}}, '
         f'ToExpression["{escaped}"]]'
+    )
+    if timeout > 0:
+        eval_part = f"TimeConstrained[{eval_part}, {timeout}]"
+
+    return (
+        f'Module[{{mcp$res}}, '
+        f'mcp$res = {eval_part}; '
+        f'mcp$res /. s_Symbol /; Context[s] === "{context}" :> '
+        f'Symbol[SymbolName[s]]]'
     )
 
 

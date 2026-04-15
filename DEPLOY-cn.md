@@ -33,6 +33,8 @@ uv sync
 
 # 4. 确认内核路径
 which WolframKernel
+# 如果找不到，或想使用其他内核，设置环境变量：
+#   export WOLFRAM_KERNEL=/path/to/WolframKernel
 
 # 5. 生成安全分组（约 1 分钟，首次运行需要启动内核查询符号分类）
 uv run mma-mcp setup
@@ -152,14 +154,17 @@ security = ""
 第 2 步：生成客户端凭据：
 
 ```bash
-uv run mma-mcp add-client claude --role default
-# 按提示输入密码，将生成的 TOML 片段粘贴到 mma_mcp.toml
+# 以 alice 为例：
+uv run mma-mcp add-client alice --role default
+# 按提示输入密码，将生成的 TOML 粘贴到 mma_mcp.toml
 
-# 如需添加更多客户端：
-uv run mma-mcp add-client chatgpt --role default
+# 按需添加更多客户端，以 bob 为例：
+uv run mma-mcp add-client bob --role default
 ```
 
 Web 客户端（Claude.ai 等）连接时会走 OAuth 2.1 流程（DCR + PKCE + 授权码），在登录页面输入 client ID 和密码。
+
+如需删除客户端，只需删除 `mma_mcp.toml` 中对应的 `[auth.clients.<name>]` 段落即可。
 
 **模式 B：静态单 token（简单场景）**
 
@@ -176,11 +181,12 @@ Web 客户端连接时同样会走 OAuth 流程，但登录页面只显示密码
 
 ## 四、创建服务用户
 
-创建专用运行时用户（类似 Apache 的 `www-data`）。`mma` 用户仅用于运行服务——无需 shell、home 目录或任何工具。
+创建专用运行时用户（类似 Apache 的 `www-data`）。`mma` 用户仅用于运行服务——无需 shell 或任何工具。需要指定 home 目录，因为 Wolfram 内核会将运行时数据（FrontEnd 初始化、字体缓存等）写入 `~/.Wolfram`。
 
 ```bash
-sudo useradd -r -s /usr/sbin/nologin mma
-sudo chown -R mma:mma /opt/mma-mcp
+sudo useradd -r -s /usr/sbin/nologin -d /opt/mma-mcp/mmahome mma
+sudo mkdir -p /opt/mma-mcp/mmahome
+sudo chown -R mma:mma /opt/mma-mcp /opt/mma-mcp/mmahome
 ```
 
 > **说明：** 绑定低端口（<1024，如 443）是 Linux capability（`CAP_NET_BIND_SERVICE`），不是传统的组权限。下面在 Caddy 的 systemd 服务中通过 `AmbientCapabilities` 授予。
@@ -226,6 +232,8 @@ caddy version
 ## 六、准备凭据
 
 环境变量文件包含 systemd 服务启动时读取的密钥。
+
+> **注意：** 等号两边不能加空格，key 和 value 必须紧贴等号（如 `KEY=value`，而非 `KEY = value`）。这是 systemd `EnvironmentFile` 的格式要求。
 
 ```bash
 sudo touch /etc/default/mma-mcp
@@ -359,7 +367,7 @@ sudo journalctl -u caddy-mma --no-pager | tail -30
 2. Settings -> Connectors -> Add custom connector
 3. URL: `https://mma.<your-domain>/mcp`
 4. 会走 OAuth 2.1 认证流程：
-   - 模式 A：输入 client ID（如 `claude`）和密码
+   - 模式 A：输入 client ID（如 `alice`）和密码
    - 模式 B：仅输入密码（即 auth token）
 5. 测试对话——使用明确的 Wolfram Language 表达式，确保工具被调用：
    - "用 evaluate 执行：`DSolve[y''[x] + x y[x] == 0, y[x], x]`"
@@ -367,6 +375,8 @@ sudo journalctl -u caddy-mma --no-pager | tail -30
    - "用 evaluate_image 执行：`Plot[Sin[x], {x, 0, 2 Pi}]`"
 
 > **ChatGPT 用户：** 在 ChatGPT 中使用 MCP 需要先到 Settings -> Apps -> Advanced settings 中打开 "Developer mode"，然后通过"Create app"添加 MCP 服务器连接。
+
+> **关于 `evaluate_image`：** 此工具为实验性功能。图片能否显示取决于客户端对 MCP `ImageContent` 的内部处理方式。实测中，Claude.ai 将图片折叠在工具结果里（需点击展开），ChatGPT 则完全不显示。如不需要图片输出，可在 `mma_mcp.toml` 中关闭——参见 `[tools]` 和 `[auth.roles]` 配置段。
 
 ---
 

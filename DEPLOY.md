@@ -33,6 +33,8 @@ uv sync
 
 # 4. Verify kernel path
 which WolframKernel
+# If not found, or you want to use a different kernel, set:
+#   export WOLFRAM_KERNEL=/path/to/WolframKernel
 
 # 5. Generate security groups (~1 min, queries local kernel for symbol classification)
 uv run mma-mcp setup
@@ -150,14 +152,17 @@ security = ""
 Step 2: Generate client credentials:
 
 ```bash
-uv run mma-mcp add-client claude --role default
+# Using alice as an example:
+uv run mma-mcp add-client alice --role default
 # Enter password at prompt, paste the generated TOML into mma_mcp.toml
 
-# Add more clients as needed:
-uv run mma-mcp add-client chatgpt --role default
+# Add more clients as needed, e.g. bob:
+uv run mma-mcp add-client bob --role default
 ```
 
 Web clients (Claude.ai, etc.) will go through the OAuth 2.1 flow (DCR + PKCE + authorization code). Users enter client ID and password on the login page.
+
+To remove a client, simply delete the corresponding `[auth.clients.<name>]` section from `mma_mcp.toml`.
 
 **Mode B: Static single token (simple setup)**
 
@@ -174,11 +179,12 @@ Web clients will still go through the OAuth flow, but the login page shows only 
 
 ## 4. Create Service User
 
-Create a dedicated runtime user (like Apache's `www-data`). The `mma` user only runs the service — it needs no shell, no home directory, and no tools.
+Create a dedicated runtime user (like Apache's `www-data`). The `mma` user only runs the service — it needs no shell and no tools. A home directory is required because Wolfram kernel writes runtime data (FrontEnd init, font cache, etc.) to `~/.Wolfram`.
 
 ```bash
-sudo useradd -r -s /usr/sbin/nologin mma
-sudo chown -R mma:mma /opt/mma-mcp
+sudo useradd -r -s /usr/sbin/nologin -d /opt/mma-mcp/mmahome mma
+sudo mkdir -p /opt/mma-mcp/mmahome
+sudo chown -R mma:mma /opt/mma-mcp /opt/mma-mcp/mmahome
 ```
 
 > **Note:** Binding to low ports (<1024, e.g., 443) requires the Linux `CAP_NET_BIND_SERVICE` capability, not traditional group permissions. This is granted via `AmbientCapabilities` in the Caddy systemd service below.
@@ -224,6 +230,8 @@ caddy version
 ## 6. Prepare Credentials
 
 The environment file contains secrets that systemd services read at startup.
+
+> **Note:** Do not add spaces around `=` — keys and values must be immediately adjacent to the equals sign (e.g., `KEY=value`, not `KEY = value`). This is a systemd `EnvironmentFile` requirement.
 
 ```bash
 sudo touch /etc/default/mma-mcp
@@ -357,7 +365,7 @@ sudo journalctl -u caddy-mma --no-pager | tail -30
 2. Settings -> Connectors -> Add custom connector
 3. URL: `https://mma.<your-domain>/mcp`
 4. Complete the OAuth 2.1 authentication flow:
-   - Mode A: enter client ID (e.g., `claude`) and password
+   - Mode A: enter client ID (e.g., `alice`) and password
    - Mode B: enter password only (the auth token)
 5. Test with a conversation — use explicit Wolfram Language expressions to ensure the tool is invoked:
    - "Use evaluate to run: `DSolve[y''[x] + x y[x] == 0, y[x], x]`"
@@ -365,6 +373,8 @@ sudo journalctl -u caddy-mma --no-pager | tail -30
    - "Use evaluate_image to run: `Plot[Sin[x], {x, 0, 2 Pi}]`"
 
 > **ChatGPT users:** To use MCP in ChatGPT, first enable "Developer mode" in Settings -> Apps -> Advanced settings, then add the MCP server connection via "Create app".
+
+> **Note on `evaluate_image`:** This tool is experimental. Whether images are displayed depends on the client's internal handling of MCP `ImageContent`. In testing, Claude.ai shows the image folded inside the tool result (click to expand), while ChatGPT does not display it at all. If you don't need image output, you can disable it in `mma_mcp.toml` — see the `[tools]` and `[auth.roles]` sections.
 
 ---
 

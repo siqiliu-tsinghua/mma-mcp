@@ -298,7 +298,7 @@ def _build_parser() -> "argparse.ArgumentParser":
     add_client = sub.add_parser(
         "add-client", help="Generate a TOML client entry (paste into mma_mcp.toml)",
     )
-    add_client.add_argument("client_id", nargs="?", help="Client identifier (e.g. claude, chatgpt)")
+    add_client.add_argument("client_id", nargs="?", help="Client identifier (e.g. alice, bob)")
     add_client.add_argument("--role", required=True, help="Role name")
 
     return parser

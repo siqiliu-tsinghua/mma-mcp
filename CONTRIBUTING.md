@@ -6,6 +6,7 @@ Thank you for your interest! Contributions of the following types are welcome:
 
 - **Deployment docs for other platforms**: The current deployment guide covers Debian/Ubuntu only. If you have successfully deployed on RHEL/Fedora, Arch, macOS, or Windows (WSL2), we welcome adapted documentation or scripts.
 - **MCP client compatibility reports**: Claude Desktop, Cursor, Windsurf, etc. — we welcome connection guides and known-issue reports.
+- **`evaluate_image` improvements**: This tool is experimental — most web MCP clients (Claude.ai, ChatGPT) do not display images inline. If you find a better approach to image delivery or a workaround for specific clients, we welcome contributions.
 - **Bug fixes and feature improvements**
 
 ## Development Setup

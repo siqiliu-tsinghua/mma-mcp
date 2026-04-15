@@ -552,24 +552,27 @@ deny_groups = [
 
 [tools]
 # MCP tools to expose to clients.
-# evaluate: returns text results; evaluate_image: returns PNG images.
+# evaluate: returns text results
+# evaluate_image: returns PNG images (experimental — see note below)
 enabled = [
     "evaluate",
     "evaluate_image",
 ]
+# Note: evaluate_image is experimental. Image display depends on the client's
+# handling of MCP ImageContent. To disable, remove "evaluate_image" above.
 
 # ─── Authentication & Roles ─────────────────────────────────────────────────
 # Client identity and role-based access control for HTTP transport.
 # Quick start:
 #   1. Uncomment [auth] and [auth.roles.default] below
-#   2. Run: mma-mcp add-client claude --role default
+#   2. Run: mma-mcp add-client alice --role default
 #   3. Paste the generated [auth.clients.xxx] section into this file
 
 # [auth]
 # enabled = true
 
 # [auth.roles.default]
-# tools = "*"              # all tools
+# tools = "*"              # all tools (or ["evaluate"] to disable image output)
 # security = ""            # inherit global security policy
 
 # Additional roles example (optional):

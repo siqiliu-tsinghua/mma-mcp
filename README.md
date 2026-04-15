@@ -23,7 +23,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that w
 
 ## Features
 
-- **MCP Tools**: `evaluate` (text) and `evaluate_image` (PNG) — all Wolfram Language capabilities through two universal tools
+- **MCP Tools**: `evaluate` (text) and `evaluate_image` (PNG, experimental) — all Wolfram Language capabilities through two universal tools
 - **Transports**: stdio (local) and Streamable HTTP
 - **Security**: Pre-kernel expression filtering with blacklist/whitelist modes and 29 capability groups
 - **Client RBAC**: Per-client credentials, per-role tool and security policy control — for isolating different AI clients on the same machine
@@ -139,7 +139,7 @@ When using HTTP transport, you can configure per-client credentials and roles to
 uv run mma-mcp hash-password
 
 # Generate TOML snippet for a new client
-uv run mma-mcp add-client claude --role admin
+uv run mma-mcp add-client alice --role admin
 ```
 
 Each client is bound to a role that controls which tools it can access, which Wolfram symbols it can use, and resource limits (timeout, result size).  Concurrent clients are isolated via a kernel worker pool — each tool call runs in an exclusive kernel process with a temporary WL context.

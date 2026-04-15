@@ -6,6 +6,7 @@
 
 - **其他平台的部署文档**：当前部署指南仅覆盖 Debian/Ubuntu。如果你在 RHEL/Fedora、Arch、macOS、Windows (WSL2) 等平台上成功部署，欢迎提交适配文档或脚本。
 - **其他 MCP 客户端的连通验证**：如 Claude Desktop、Cursor、Windsurf 等，欢迎补充连通步骤和已知问题。
+- **`evaluate_image` 改进**：此工具为实验性功能——多数 Web MCP 客户端（Claude.ai、ChatGPT）无法内联显示图片。如果你找到更好的图片传递方案或针对特定客户端的解决办法，欢迎贡献。
 - **Bug 修复和功能改进**
 
 ## 开发环境

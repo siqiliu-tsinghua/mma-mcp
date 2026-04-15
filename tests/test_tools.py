@@ -315,14 +315,16 @@ class TestPoolWorkerFromContext:
             assert isinstance(wl_context, str)
             assert wl_context.endswith("`")
 
-    def test_wrap_context_still_works(self):
-        """_wrap_context is still used internally by KernelSession for temp contexts."""
-        from mma_mcp.kernel import _wrap_context
-        assert _wrap_context("1+1", "") == "1+1"
-        wrapped = _wrap_context("x = 5", "Pool$abc1`")
+    def test_eval_in_context_still_works(self):
+        """_eval_in_context is used internally by KernelSession for temp contexts."""
+        from mma_mcp.kernel import _eval_in_context
+        assert _eval_in_context("1+1", "") == "1+1"
+        wrapped = _eval_in_context("x = 5", "Pool$abc1`")
         assert '$Context = "Pool$abc1`"' in wrapped
         assert '$ContextPath' in wrapped
         assert "x = 5" in wrapped
+        # Should include context restoration (ReplaceAll)
+        assert 'Symbol[SymbolName[s]]' in wrapped
 
 
 # ===================================================================
