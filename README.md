@@ -40,7 +40,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that w
 
 ```bash
 # Clone and install
-git clone https://github.com/<owner>/mma-mcp.git
+git clone https://github.com/siqiliu-tsinghua/mma-mcp.git
 cd mma-mcp
 uv sync
 

@@ -8,7 +8,7 @@ build/
 .claude/
 .codex
 *.db
-ASSESSMENT_REPORT.md
+TODO.md
 
 # Generated from local Wolfram kernel (contains WolframLanguageData derivatives)
 src/mma_mcp/security/groups/*.json

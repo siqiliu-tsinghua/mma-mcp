@@ -13,7 +13,7 @@
 
 ```bash
 # 克隆项目
-git clone https://github.com/<owner>/mma-mcp.git
+git clone https://github.com/siqiliu-tsinghua/mma-mcp.git
 cd mma-mcp
 
 # 安装依赖（需要 uv）

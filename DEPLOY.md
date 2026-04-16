@@ -20,7 +20,7 @@
 
 ```bash
 # 1. Clone the project and move to /opt
-git clone https://github.com/<owner>/mma-mcp.git
+git clone https://github.com/siqiliu-tsinghua/mma-mcp.git
 sudo mv mma-mcp /opt/mma-mcp
 cd /opt/mma-mcp
 
@@ -461,6 +461,29 @@ sudo fail2ban-client set mma-mcp-probe unbanip <IP>
 ```
 
 > **Note:** The application layer already has exponential backoff protection (locking up to 15 minutes after 5 failures). fail2ban is a second layer of defense, dropping all traffic from malicious IPs at the network level. The login jail `bantime` is set to 1 hour (shorter than the 12-hour scanning ban) because legitimate users are more likely to mistype a password.
+
+---
+
+## Routine Management
+
+After deployment, admins can use the CLI tools directly from the `.venv` — no need to install `uv`:
+
+```bash
+# Add a new client (outputs a TOML snippet)
+/opt/mma-mcp/.venv/bin/mma-mcp add-client bob --role default
+
+# Hash a password
+/opt/mma-mcp/.venv/bin/mma-mcp hash-password
+```
+
+Paste the generated TOML snippet into the config file and restart:
+
+```bash
+sudo nano /opt/mma-mcp/mma_mcp.toml
+sudo systemctl restart mma-mcp
+```
+
+To remove a client, delete its `[auth.clients.<name>]` section from the config file and restart.
 
 ---
 

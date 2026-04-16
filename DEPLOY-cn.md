@@ -20,7 +20,7 @@
 
 ```bash
 # 1. 克隆项目并移至 /opt
-git clone https://github.com/<owner>/mma-mcp.git
+git clone https://github.com/siqiliu-tsinghua/mma-mcp.git
 sudo mv mma-mcp /opt/mma-mcp
 cd /opt/mma-mcp
 
@@ -466,6 +466,29 @@ sudo fail2ban-client set mma-mcp-probe unbanip <IP>
 > fail2ban 是第二层防线，直接在网络层丢弃恶意 IP 的所有流量。
 > 登录 jail 的 `bantime` 设为 1 小时（比扫描的 12 小时短），
 > 因为合法用户输错密码的概率更高。
+
+---
+
+## 日常管理
+
+部署完成后，管理员可直接使用 `.venv` 中的命令行工具，无需安装 `uv`：
+
+```bash
+# 添加新客户端（输出 TOML 片段）
+/opt/mma-mcp/.venv/bin/mma-mcp add-client bob --role default
+
+# 哈希密码
+/opt/mma-mcp/.venv/bin/mma-mcp hash-password
+```
+
+将生成的 TOML 片段粘贴到配置文件中，重启服务即可生效：
+
+```bash
+sudo nano /opt/mma-mcp/mma_mcp.toml
+sudo systemctl restart mma-mcp
+```
+
+删除客户端只需从配置文件中移除对应的 `[auth.clients.<name>]` 段落，然后重启。
 
 ---
 

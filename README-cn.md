@@ -36,7 +36,7 @@
 
 ```bash
 # 克隆并安装
-git clone https://github.com/<owner>/mma-mcp.git
+git clone https://github.com/siqiliu-tsinghua/mma-mcp.git
 cd mma-mcp
 uv sync
 

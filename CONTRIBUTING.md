@@ -13,7 +13,7 @@ Thank you for your interest! Contributions of the following types are welcome:
 
 ```bash
 # Clone the project
-git clone https://github.com/<owner>/mma-mcp.git
+git clone https://github.com/siqiliu-tsinghua/mma-mcp.git
 cd mma-mcp
 
 # Install dependencies (requires uv)
