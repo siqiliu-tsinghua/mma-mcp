@@ -14,6 +14,7 @@ from typing import AsyncIterator
 
 import anyio
 import anyio.lowlevel
+import anyio.to_thread
 import mcp.types as types
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 from mcp.shared.message import SessionMessage
@@ -26,15 +27,18 @@ async def stdio_transport() -> AsyncIterator[
         MemoryObjectSendStream[SessionMessage],
     ]
 ]:
-    """Stdio transport using asyncio pipe reader + direct stdout.buffer writes."""
+    """Stdio transport using a thread-based stdin reader + direct stdout.buffer writes.
 
-    loop = asyncio.get_running_loop()
+    NOTE: stdin is read via anyio.to_thread (a blocking readline in a worker thread)
+    rather than asyncio.connect_read_pipe. On Windows the Proactor event loop cannot
+    register the stdin pipe handle with IOCP (raises OSError [WinError 6]), which
+    silently kills the read loop so the server never receives the client's
+    `initialize` request. A worker thread sidesteps the event loop entirely and works
+    on Windows, macOS and Linux alike.
+    """
 
-    # --- stdin: use asyncio StreamReader via connect_read_pipe ---
-    reader = asyncio.StreamReader()
-    read_protocol = asyncio.StreamReaderProtocol(reader)
-    # sys.stdin.buffer is the raw binary buffer; works for both pipes and TTYs
-    await loop.connect_read_pipe(lambda: read_protocol, sys.stdin.buffer)
+    # --- stdin: blocking readline in a worker thread (Windows-safe) ---
+    stdin_buf = sys.stdin.buffer
 
     # --- stdout: write directly to sys.stdout.buffer (avoids connect_write_pipe) ---
     stdout_buf = sys.stdout.buffer
@@ -48,7 +52,11 @@ async def stdio_transport() -> AsyncIterator[
         async with read_stream_writer:
             while True:
                 try:
-                    line = await reader.readline()
+                    line = await anyio.to_thread.run_sync(
+                        stdin_buf.readline, abandon_on_cancel=True
+                    )
+                except anyio.get_cancelled_exc_class():
+                    raise
                 except Exception as exc:
                     await read_stream_writer.send(exc)
                     break
