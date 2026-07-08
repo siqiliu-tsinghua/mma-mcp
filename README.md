@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/siqiliu-tsinghua-mma-mcp-badge.png)](https://mseep.ai/app/siqiliu-tsinghua-mma-mcp)
+
 # mma-mcp
 
 [Chinese / 中文版](README-cn.md)
