@@ -1,5 +1,18 @@
 # mma-mcp
 
+[English](README.md)
+
+> [!WARNING]
+> **本项目已废弃，不再维护。代码保留在 GitHub 上仅供参考。**
+>
+> **一、Wolfram 15 已自带官方 MCP server。** Mathematica / Wolfram 15 内置 `Wolfram/AgentTools` paclet，可启动本地 stdio MCP server，提供 `WolframLanguageEvaluator`（支持每次调用的 `timeConstraint`、可持久化的 `session`、以及沙箱化的 `Method -> "Local"` 模式）、`WolframContext`、Notebook 读写、`CodeInspector`、`TestReport` 等工具。就本地使用而言，它已经覆盖了 mma-mcp 的大部分功能，而且是在内核内部实现的，比外挂封装更可靠。具体用法请参考官方文档。
+>
+> **二、MCP 协议和 SDK 已经演进。** 本项目基于 v1 版 Python SDK，使用了 `mcp._mcp_server` 等私有接口和自行实现的 stdio transport，而依赖声明是无上限的 `mcp[cli]>=1.0`。在 `mcp` 2.x 成为默认安装结果之后，全新安装很可能在导入阶段就失败。其中内嵌的 OAuth 2.1 服务器和会话管理部分，与当前 MCP 授权模型已不匹配。
+>
+> **三、如果你仍要运行它，请注意一个安全问题。** 能力分组的 JSON 文件由本地生成且被 gitignore 排除。**如果没有成功运行过 `mma-mcp setup`，默认黑名单会解析为空集合，表达式过滤将不拦截任何符号**——包括 `Run`、文件读写和网络访问。在这种状态下切勿接入任何不可信输入。
+>
+> **后续计划：** 我们正在开发另一个体量小得多的工具，专注于**从手机端**通过 Claude 或 ChatGPT，经 HTTPS 访问自己工作站上的 Mathematica / Wolfram Engine。敬请期待。
+
 一个 [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) 服务器，封装本地 **Wolfram Engine**，使 AI 助手（Claude、ChatGPT 等）能够通过 Wolfram Language 进行符号数学、数值分析和数据可视化。
 
 > **免责声明：** 这是一个**非官方的**个人独立项目。

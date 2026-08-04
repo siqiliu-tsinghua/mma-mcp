@@ -2,6 +2,17 @@
 
 [Chinese / 中文版](README-cn.md)
 
+> [!WARNING]
+> **This project is deprecated and no longer maintained. The code is kept on GitHub for reference only.**
+>
+> **1. Wolfram 15 ships an official MCP server.** Mathematica / Wolfram 15 includes the `Wolfram/AgentTools` paclet, which starts a local stdio MCP server exposing `WolframLanguageEvaluator` (with per-call `timeConstraint`, persistent `session`, and a sandboxed `Method -> "Local"` mode), `WolframContext`, notebook read/write, `CodeInspector`, `TestReport` and more. For local use this covers most of what mma-mcp was built for — and it does it inside the kernel, rather than through an external wrapper. See the official documentation for usage.
+>
+> **2. The MCP protocol and SDK have moved on.** This project targets the v1 Python SDK, including private APIs such as `mcp._mcp_server` and a hand-written stdio transport, and declares its dependency as `mcp[cli]>=1.0` with no upper bound. Now that `mcp` 2.x is the default install, a fresh install is likely to fail at import time. The embedded OAuth 2.1 server and the session handling in particular no longer match the current MCP authorization model.
+>
+> **3. Security caveat if you run it anyway.** The capability-group JSON files are generated locally and are gitignored. **If `mma-mcp setup` has not been run successfully, the default blacklist resolves to an empty set and the expression filter blocks nothing at all** — including `Run`, file I/O and networking. Never point this at untrusted input in that state.
+>
+> **What's next:** we are building a separate, much smaller tool focused on reaching your own workstation's Mathematica / Wolfram Engine **from a phone**, via Claude or ChatGPT over HTTPS. Stay tuned.
+
 A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that wraps a local **Wolfram Engine**, enabling AI assistants (Claude, ChatGPT, etc.) to perform symbolic math, numerical analysis, and data visualization via Wolfram Language.
 
 > **Disclaimer:** This is an **unofficial**, independent, personal project.
